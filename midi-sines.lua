@@ -80,15 +80,14 @@ local flash = {}          -- per-band note flash
 
 -- ===== HELPERS =====
 
--- Get MIDI device name by port number
+-- Get MIDI device name by vport number (1-16)
+-- midi.connect(n) uses vports, NOT device IDs
 function get_midi_device_name(port)
-  if midi.devices[port] and midi.devices[port].name then
-    return midi.devices[port].name
-  end
-  -- Sometimes devices are indexed differently
-  for _, dev in pairs(midi.devices) do
-    if dev.port == port and dev.name then
-      return dev.name
+  -- vports is the correct lookup for midi.connect() port numbers
+  if midi.vports and midi.vports[port] then
+    local vp = midi.vports[port]
+    if vp.name and vp.name ~= "none" and vp.name ~= "" then
+      return vp.name
     end
   end
   return "none"
