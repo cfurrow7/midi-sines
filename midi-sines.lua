@@ -385,19 +385,19 @@ end
 
 -- ===== CLOCK =====
 
-local function is_drum(role)
+function is_drum(role)
   return role == "kick" or role == "snare" or role == "hat"
 end
 
-local function is_melodic(role)
+function is_melodic(role)
   return role == "bass" or role == "chord" or role == "lead"
 end
 
-local function get_chord_root()
+function get_chord_root()
   return prog.steps[prog.position] or 1
 end
 
-local function activate_band(i)
+function activate_band(i)
   local b = bands[i]
   if is_melodic(b.role) then
     vm:activate_melodic(i, bands, get_chord_root())
@@ -405,7 +405,7 @@ local function activate_band(i)
   end
 end
 
-local function deactivate_band(i)
+function deactivate_band(i)
   local b = bands[i]
   if is_melodic(b.role) then
     vm:deactivate(i, b.role)
@@ -413,7 +413,7 @@ local function deactivate_band(i)
 end
 
 -- Set band volume with voice management
-local function set_band_vol(i, vol)
+function set_band_vol(i, vol)
   local b = bands[i]
   local old_vol = b.vol
   b.vol = vol
@@ -438,7 +438,7 @@ local function set_band_vol(i, vol)
   -- Drums handled by the clock
 end
 
-local function start_playing()
+function start_playing()
   if playing then return end
   playing = true
   sixteenth = 0
@@ -500,7 +500,7 @@ local function start_playing()
   end)
 end
 
-local function stop_playing()
+function stop_playing()
   playing = false
   if main_clock then
     clock.cancel(main_clock)
