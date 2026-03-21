@@ -83,6 +83,7 @@ function MidiMix:connect(device_num)
   self.midi_in.event = function(data)
     self:handle_event(data)
   end
+  self.debug = true  -- set false once working
   print("MIDIMIX connected on device " .. device_num)
 end
 
@@ -100,6 +101,18 @@ end
 
 function MidiMix:handle_event(data)
   local msg = midi.to_msg(data)
+
+  if self.debug then
+    if msg.type == "cc" then
+      print("MIDIMIX CC: " .. msg.cc .. " val:" .. msg.val .. " ch:" .. (msg.ch or "?"))
+    elseif msg.type == "note_on" then
+      print("MIDIMIX NOTE ON: " .. msg.note .. " vel:" .. msg.vel .. " ch:" .. (msg.ch or "?"))
+    elseif msg.type == "note_off" then
+      print("MIDIMIX NOTE OFF: " .. msg.note .. " ch:" .. (msg.ch or "?"))
+    else
+      print("MIDIMIX MSG: type=" .. (msg.type or "?"))
+    end
+  end
 
   if msg.type == "cc" then
     self:handle_cc(msg.cc, msg.val)

@@ -78,6 +78,26 @@ local prog_cursor = 1     -- selected prog field
 local prog_step_cursor = 1
 local flash = {}          -- per-band note flash
 
+-- ===== HELPERS =====
+
+-- Get MIDI device name by port number
+function get_midi_device_name(port)
+  if midi.devices[port] and midi.devices[port].name then
+    return midi.devices[port].name
+  end
+  -- Sometimes devices are indexed differently
+  for _, dev in pairs(midi.devices) do
+    if dev.port == port and dev.name then
+      return dev.name
+    end
+  end
+  return "none"
+end
+
+-- Config page state
+local config_cursor = 1  -- 1=MIDI out, 2=MIDIMIX, 3-6=channels
+local CONFIG_FIELDS = {"MIDI Out", "MIDIMIX", "Bass Ch", "Chord Ch", "Lead Ch", "Drum Ch"}
+
 -- ===== INIT =====
 
 function init()
@@ -166,19 +186,53 @@ function init()
   -- MIDIMIX params
   params:add_separator("MIDIMIX")
 
-  params:add_number("midimix_device", "MIDIMIX Device", 1, 16, 2)
+  params:add_number("midimix_device", "MIDIMIX Device", 1, 16, 1)
   params:set_action("midimix_device", function(val)
     mm:connect(val)
     mm:update_leds(bands)
+    print("MIDIMIX -> device " .. val .. ": " .. get_midi_device_name(val))
   end)
 
-  -- Connect MIDI out
-  vm:connect(1)
+  -- Scan and print all MIDI devices
+  print("--- MIDI DEVICES ---")
+  local midimix_port = nil
+  local midi_out_port = nil
+  for i = 1, 16 do
+    local name = get_midi_device_name(i)
+    if name ~= "none" then
+      print("  " .. i .. ": " .. name)
+      -- Auto-detect MIDIMIX
+      if string.find(string.lower(name), "midi mix") or
+         string.find(string.lower(name), "midimix") or
+         string.find(string.lower(name), "akai") then
+        midimix_port = i
+      end
+      -- Auto-detect a non-MIDIMIX device for MIDI out
+      if not midi_out_port and midimix_port ~= i then
+        midi_out_port = i
+      end
+    end
+  end
+  print("--------------------")
 
-  -- Connect MIDIMIX
+  -- Connect MIDI out (auto-detect or default to 1)
+  local out_port = midi_out_port or 1
+  vm:connect(out_port)
+  params:set("midi_device", out_port, true)
+  print("MIDI OUT -> device " .. out_port .. ": " .. get_midi_device_name(out_port))
+
+  -- Connect MIDIMIX (auto-detect or default to 1)
   mm = MidiMix.new()
   setup_midimix()
-  mm:connect(2)
+  local mm_port = midimix_port or 1
+  mm:connect(mm_port)
+  params:set("midimix_device", mm_port, true)
+  if midimix_port then
+    print("MIDIMIX auto-detected on device " .. mm_port .. ": " .. get_midi_device_name(mm_port))
+  else
+    print("MIDIMIX not auto-detected. Set device in PARAMS or CONFIG page.")
+    print("Use E2/E3 on CONFIG page to select MIDI devices.")
+  end
 
   -- Redraw clock
   redraw_clock = clock.run(function()
@@ -606,39 +660,36 @@ function draw_prog()
 end
 
 function draw_config()
-  local configs = {
-    {"Bass",  "ch " .. vm.pools.bass.ch,  "max " .. vm.pools.bass.max, vm:pool_status("bass")},
-    {"Chord", "ch " .. vm.pools.chord.ch, "max " .. vm.pools.chord.max, vm:pool_status("chord")},
-    {"Lead",  "ch " .. vm.pools.lead.ch,  "max " .. vm.pools.lead.max, vm:pool_status("lead")},
-    {"Drum",  "ch " .. vm.drum_ch,        "K:" .. vm.drum_notes.kick .. " S:" .. vm.drum_notes.snare .. " H:" .. vm.drum_notes.hat, ""},
+  -- MIDI device selection
+  local out_port = params:get("midi_device")
+  local mm_port = params:get("midimix_device")
+  local out_name = get_midi_device_name(out_port)
+  local mm_name = get_midi_device_name(mm_port)
+
+  local rows = {
+    {"MIDI Out:", out_port .. ": " .. out_name:sub(1, 16)},
+    {"MIDIMIX:",  mm_port .. ": " .. mm_name:sub(1, 16)},
+    {"Bass:",     "ch " .. vm.pools.bass.ch .. "  max " .. vm.pools.bass.max .. "  " .. vm:pool_status("bass")},
+    {"Chord:",    "ch " .. vm.pools.chord.ch .. "  max " .. vm.pools.chord.max .. "  " .. vm:pool_status("chord")},
+    {"Lead:",     "ch " .. vm.pools.lead.ch .. "  max " .. vm.pools.lead.max .. "  " .. vm:pool_status("lead")},
+    {"Drum:",     "ch " .. vm.drum_ch .. "  K:" .. vm.drum_notes.kick .. " S:" .. vm.drum_notes.snare .. " H:" .. vm.drum_notes.hat},
   }
 
-  for i, cfg in ipairs(configs) do
-    local y = 8 + i * 12
-    screen.level(8)
+  for i, row in ipairs(rows) do
+    local y = 4 + i * 9
+    local selected = (config_cursor == i)
+    screen.level(selected and 15 or 5)
     screen.move(0, y)
-    screen.text(cfg[1])
-    screen.level(5)
-    screen.move(40, y)
-    screen.text(cfg[2])
-    screen.move(70, y)
-    screen.text(cfg[3])
-    if cfg[4] ~= "" then
-      screen.level(12)
-      screen.move(110, y)
-      screen.text(cfg[4])
-    end
+    screen.text(row[1])
+    screen.level(selected and 12 or 4)
+    screen.move(48, y)
+    screen.text(row[2])
   end
 
-  -- Selected band detail
-  local b = bands[cursor]
+  -- Help
   screen.level(3)
   screen.move(0, 64)
-  local note_val = vm:get_note(get_chord_root(), b.degree, b.octave)
-  screen.text("Band " .. cursor .. ": " .. b.role
-    .. " d" .. b.degree .. " o" .. b.octave
-    .. " r" .. b.rate
-    .. " -> " .. vm:get_note_name(note_val))
+  screen.text("E2:select  E3:change")
 end
 
 -- ===== INPUT =====
@@ -651,6 +702,8 @@ function enc(n, d)
     enc_bands(n, d)
   elseif page == 2 then
     enc_prog(n, d)
+  elseif page == 3 then
+    enc_config(n, d)
   end
   redraw()
 end
@@ -750,6 +803,38 @@ function enc_prog(n, d)
       if playing then
         vm:retrigger_all(bands, get_chord_root())
       end
+    end
+  end
+end
+
+function enc_config(n, d)
+  if n == 2 then
+    config_cursor = util.clamp(config_cursor + d, 1, #CONFIG_FIELDS)
+  elseif n == 3 then
+    if config_cursor == 1 then
+      -- MIDI Out device
+      local val = util.clamp(params:get("midi_device") + d, 1, 16)
+      params:set("midi_device", val)
+    elseif config_cursor == 2 then
+      -- MIDIMIX device
+      local val = util.clamp(params:get("midimix_device") + d, 1, 16)
+      params:set("midimix_device", val)
+    elseif config_cursor == 3 then
+      local val = util.clamp(vm.pools.bass.ch + d, 1, 16)
+      vm.pools.bass.ch = val
+      params:set("bass_ch", val)
+    elseif config_cursor == 4 then
+      local val = util.clamp(vm.pools.chord.ch + d, 1, 16)
+      vm.pools.chord.ch = val
+      params:set("chord_ch", val)
+    elseif config_cursor == 5 then
+      local val = util.clamp(vm.pools.lead.ch + d, 1, 16)
+      vm.pools.lead.ch = val
+      params:set("lead_ch", val)
+    elseif config_cursor == 6 then
+      local val = util.clamp(vm.drum_ch + d, 1, 16)
+      vm.drum_ch = val
+      params:set("drum_ch", val)
     end
   end
 end
