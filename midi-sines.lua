@@ -196,42 +196,49 @@ function init()
   -- Scan and print all MIDI devices
   print("--- MIDI DEVICES ---")
   local midimix_port = nil
-  local midi_out_port = nil
+  local all_ports = {}
   for i = 1, 16 do
     local name = get_midi_device_name(i)
     if name ~= "none" then
       print("  " .. i .. ": " .. name)
+      table.insert(all_ports, {port = i, name = name})
       -- Auto-detect MIDIMIX
-      if string.find(string.lower(name), "midi mix") or
-         string.find(string.lower(name), "midimix") or
-         string.find(string.lower(name), "akai") then
+      local lower = string.lower(name)
+      if string.find(lower, "midi mix") or
+         string.find(lower, "midimix") or
+         string.find(lower, "akai") then
         midimix_port = i
-      end
-      -- Auto-detect a non-MIDIMIX device for MIDI out
-      if not midi_out_port and midimix_port ~= i then
-        midi_out_port = i
       end
     end
   end
   print("--------------------")
 
-  -- Connect MIDI out (auto-detect or default to 1)
-  local out_port = midi_out_port or 1
-  vm:connect(out_port)
-  params:set("midi_device", out_port, true)
-  print("MIDI OUT -> device " .. out_port .. ": " .. get_midi_device_name(out_port))
+  -- Find MIDI out: first device that is NOT the MIDIMIX
+  local midi_out_port = nil
+  for _, d in ipairs(all_ports) do
+    if d.port ~= midimix_port then
+      midi_out_port = d.port
+      break
+    end
+  end
+  -- Fallback: if only one device and it's the MIDIMIX, use port 1 anyway
+  if not midi_out_port then midi_out_port = 1 end
 
-  -- Connect MIDIMIX (auto-detect or default to 1)
+  -- Connect MIDI out
+  vm:connect(midi_out_port)
+  params:set("midi_device", midi_out_port, true)
+  print("MIDI OUT -> device " .. midi_out_port .. ": " .. get_midi_device_name(midi_out_port))
+
+  -- Connect MIDIMIX
   mm = MidiMix.new()
   setup_midimix()
-  local mm_port = midimix_port or 1
+  local mm_port = midimix_port or 2  -- default to 2 if not found
   mm:connect(mm_port)
   params:set("midimix_device", mm_port, true)
   if midimix_port then
     print("MIDIMIX auto-detected on device " .. mm_port .. ": " .. get_midi_device_name(mm_port))
   else
-    print("MIDIMIX not auto-detected. Set device in PARAMS or CONFIG page.")
-    print("Use E2/E3 on CONFIG page to select MIDI devices.")
+    print("MIDIMIX not auto-detected. Go to CONFIG page (E1) and set device with E3.")
   end
 
   -- Redraw clock
