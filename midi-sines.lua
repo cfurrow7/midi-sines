@@ -20,6 +20,7 @@
 
 local MusicUtil = require "musicutil"
 local Voices = include("midi-sines/lib/voices")
+local MidiMix = include("midi-sines/lib/midimix")
 
 -- ===== CONSTANTS =====
 
@@ -55,6 +56,7 @@ local DEFAULTS = {
 -- ===== STATE =====
 
 local vm = nil            -- VoiceManager
+local mm = nil            -- MidiMix controller
 local bands = {}          -- 16 bands: {role, degree, octave, rate, vol}
 local playing = false
 local main_clock = nil
@@ -161,8 +163,22 @@ function init()
   params:add_number("hat_note", "Hat Note", 0, 127, 42)
   params:set_action("hat_note", function(val) vm.drum_notes.hat = val end)
 
-  -- Connect MIDI
+  -- MIDIMIX params
+  params:add_separator("MIDIMIX")
+
+  params:add_number("midimix_device", "MIDIMIX Device", 1, 16, 2)
+  params:set_action("midimix_device", function(val)
+    mm:connect(val)
+    mm:update_leds(bands)
+  end)
+
+  -- Connect MIDI out
   vm:connect(1)
+
+  -- Connect MIDIMIX
+  mm = MidiMix.new()
+  setup_midimix()
+  mm:connect(2)
 
   -- Redraw clock
   redraw_clock = clock.run(function()
@@ -174,6 +190,129 @@ function init()
   end)
 
   print("MIDI SINES loaded")
+  print("MIDIMIX: faders=volume, knobs=degree/octave/rate")
+  print("MIDIMIX: mute=toggle, solo=cycle role, bank=1-8/9-16")
+end
+
+-- ===== MIDIMIX CALLBACKS =====
+
+function setup_midimix()
+  -- Faders: band volume
+  mm.on_volume = function(band_idx, vol)
+    if band_idx >= 1 and band_idx <= NUM_BANDS then
+      set_band_vol(band_idx, vol)
+      cursor = band_idx  -- follow selection
+      mm:update_leds(bands)
+    end
+  end
+
+  -- Knob row 1: degree
+  mm.on_degree = function(band_idx, degree)
+    if band_idx >= 1 and band_idx <= NUM_BANDS then
+      bands[band_idx].degree = degree
+      cursor = band_idx
+      if bands[band_idx].vol > 0 and is_melodic(bands[band_idx].role) then
+        if vm:has_voice(band_idx, bands[band_idx].role) then
+          activate_band(band_idx)
+        end
+      end
+    end
+  end
+
+  -- Knob row 2: octave
+  mm.on_octave = function(band_idx, octave)
+    if band_idx >= 1 and band_idx <= NUM_BANDS then
+      bands[band_idx].octave = octave
+      cursor = band_idx
+      if bands[band_idx].vol > 0 and is_melodic(bands[band_idx].role) then
+        if vm:has_voice(band_idx, bands[band_idx].role) then
+          activate_band(band_idx)
+        end
+      end
+    end
+  end
+
+  -- Knob row 3: rate
+  mm.on_rate = function(band_idx, rate)
+    if band_idx >= 1 and band_idx <= NUM_BANDS then
+      bands[band_idx].rate = rate
+      cursor = band_idx
+      -- If going back to drone, retrigger
+      if rate == 0 and bands[band_idx].vol > 0 and is_melodic(bands[band_idx].role) then
+        if vm:has_voice(band_idx, bands[band_idx].role) then
+          activate_band(band_idx)
+        end
+      end
+    end
+  end
+
+  -- Mute buttons: toggle band on/off
+  mm.on_mute_toggle = function(band_idx)
+    if band_idx >= 1 and band_idx <= NUM_BANDS then
+      local b = bands[band_idx]
+      if b.vol > 0 then
+        -- Mute: save volume, set to 0
+        mm.saved_vol[band_idx] = b.vol
+        set_band_vol(band_idx, 0)
+      else
+        -- Unmute: restore saved volume
+        local restore = mm.saved_vol[band_idx]
+        if restore <= 0 then restore = 0.5 end
+        set_band_vol(band_idx, restore)
+      end
+      cursor = band_idx
+      mm:update_leds(bands)
+    end
+  end
+
+  -- Solo buttons: cycle role
+  mm.on_role_cycle = function(band_idx)
+    if band_idx >= 1 and band_idx <= NUM_BANDS then
+      local b = bands[band_idx]
+      local idx = 1
+      for i, r in ipairs(ROLES) do
+        if r == b.role then idx = i; break end
+      end
+      local old_role = b.role
+      idx = (idx % #ROLES) + 1
+      local new_role = ROLES[idx]
+      if b.vol > 0 then deactivate_band(band_idx) end
+      b.role = new_role
+      if b.vol > 0 and is_melodic(new_role) then
+        activate_band(band_idx)
+      end
+      cursor = band_idx
+    end
+  end
+
+  -- Master fader: beats per step
+  mm.on_beats = function(beats)
+    prog.beats_per_step = beats
+    params:set("beats_per_step", beats)
+  end
+
+  -- Bank switch
+  mm.on_bank = function(bank)
+    -- Update screen cursor to show the active bank
+    if bank == 0 then
+      cursor = util.clamp(cursor, 1, 8)
+    else
+      cursor = util.clamp(cursor, 9, 16)
+    end
+    mm:update_leds(bands)
+  end
+
+  -- Rec arm buttons: play/stop toggle per band
+  -- (using as a secondary function: start/stop the clock)
+  mm.on_rec = function(band_idx)
+    -- Any rec arm button toggles play/stop
+    if playing then
+      stop_playing()
+    else
+      start_playing()
+    end
+    mm:update_leds(bands)
+  end
 end
 
 -- ===== FLASH =====
@@ -405,12 +544,14 @@ function draw_bands()
   screen.move(108, 58)
   screen.text(playing and ">>>" or "---")
 
-  -- Voice status line
+  -- Voice status line + bank indicator
   screen.level(3)
   screen.move(0, 64)
+  local bank_str = mm and ("[" .. (mm.bank == 0 and "1-8" or "9-16") .. "]") or ""
   screen.text("B:" .. vm:pool_status("bass")
     .. " C:" .. vm:pool_status("chord")
-    .. " L:" .. vm:pool_status("lead"))
+    .. " L:" .. vm:pool_status("lead")
+    .. " " .. bank_str)
 end
 
 function draw_prog()
@@ -662,4 +803,5 @@ end
 function cleanup()
   if redraw_clock then clock.cancel(redraw_clock) end
   stop_playing()
+  if mm then mm:leds_off() end
 end
