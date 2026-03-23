@@ -902,7 +902,7 @@ function draw_prog()
   -- Settings below
   local bpm = params:get("clock_tempo")
   local fields = {
-    {"Steps", "E2/E3: select/change step"},
+    {"Steps", "E3:select  K3:change"},
     {"BPM", tostring(math.floor(bpm))},
     {"Beats/Step", tostring(prog.beats_per_step)},
     {"Key", NOTE_NAMES[vm.key_idx]},
@@ -1045,21 +1045,12 @@ end
 
 function enc_prog(n, d)
   if n == 2 then
-    if prog_cursor == 1 then
-      -- Navigate steps
-      prog_step_cursor = util.clamp(prog_step_cursor + d, 1, math.max(1, #prog.steps))
-    else
-      -- Navigate fields
-      prog_cursor = util.clamp(prog_cursor + d, 1, 6)
-    end
+    -- E2 always navigates between fields
+    prog_cursor = util.clamp(prog_cursor + d, 1, 6)
   elseif n == 3 then
     if prog_cursor == 1 then
-      -- Change step degree
-      if #prog.steps > 0 then
-        local deg = prog.steps[prog_step_cursor]
-        deg = util.clamp(deg + d, 1, 7)
-        prog.steps[prog_step_cursor] = deg
-      end
+      -- E3 on steps: navigate which step is selected
+      prog_step_cursor = util.clamp(prog_step_cursor + d, 1, math.max(1, #prog.steps))
     elseif prog_cursor == 2 then
       -- BPM
       local bpm = params:get("clock_tempo")
@@ -1166,18 +1157,14 @@ function key(n, z)
         if playing then
           vm:retrigger_all(bands, get_chord_root())
         end
-      else
-        -- Add step after cursor
-        local new_deg = prog.steps[prog_step_cursor] or 1
-        table.insert(prog.steps, prog_step_cursor + 1, new_deg)
-        prog_step_cursor = prog_step_cursor + 1
-      end
-
-      -- Toggle between step select and field select
-      if not k1_held and prog_cursor ~= 1 then
-        prog_cursor = 1
-      elseif not k1_held and prog_cursor == 1 then
-        prog_cursor = 2
+      elseif prog_cursor == 1 then
+        -- K3 on steps row: cycle selected step degree up (wraps 7->1)
+        if #prog.steps > 0 then
+          local deg = prog.steps[prog_step_cursor]
+          deg = (deg % 7) + 1
+          prog.steps[prog_step_cursor] = deg
+          prog.name = nil  -- custom edit clears preset name
+        end
       end
     elseif page == 3 then
       local roles = {"bass", "chord", "lead"}
