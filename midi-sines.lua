@@ -32,7 +32,7 @@ local ROLE_COLORS = {bass=12, chord=15, lead=10, kick=6, snare=5, hat=4}
 local NUMERALS = {"I", "ii", "iii", "IV", "V", "vi", "vii"}
 local EDIT_NAMES = {"VOL", "ROLE", "DEG", "OCT", "RATE", "ARP"}
 local ARP_MODES = {"OFF", "UP", "DN", "UPDN", "RAND"}
-local ARP_OCTAVES = 3  -- arp spans 3 octaves (0, +1, +2)
+local ARP_OCTAVES = 2  -- arp spans 2 octaves (0, +1)
 
 -- Drum patterns: 16-step arrays (1=hit, 0=rest)
 -- Fader position selects pattern (0=off, then patterns by intensity/complexity)
