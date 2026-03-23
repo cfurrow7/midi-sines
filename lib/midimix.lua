@@ -133,10 +133,9 @@ function MidiMix:handle_cc(cc, val)
     return
   end
 
-  -- Master fader: beats per step
+  -- Master fader: pass raw 0-127 value
   if cc == MASTER_CC then
-    local beats = cc_to_range(val, 1, 16)
-    if self.on_beats then self.on_beats(beats) end
+    if self.on_beats then self.on_beats(val) end
     return
   end
 

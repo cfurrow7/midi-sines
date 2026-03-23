@@ -385,10 +385,10 @@ function setup_midimix()
     end
   end
 
-  -- Master fader: beats per step
-  mm.on_beats = function(beats)
-    prog.beats_per_step = beats
-    params:set("beats_per_step", beats)
+  -- Master fader: BPM (20-300, mapped from CC 0-127)
+  mm.on_beats = function(val)
+    local bpm = 20 + math.floor(val / 127 * 280)
+    params:set("clock_tempo", util.clamp(bpm, 20, 300))
   end
 
   -- Bank switch
@@ -817,10 +817,10 @@ function draw_bands()
   end
   screen.text("E3:" .. edit_label)
 
-  -- Play indicator
+  -- BPM + play indicator
   screen.level(playing and 15 or 3)
-  screen.move(108, 58)
-  screen.text(playing and ">>>" or "---")
+  screen.move(100, 58)
+  screen.text(math.floor(params:get("clock_tempo")) .. (playing and ">" or ""))
 
   -- Voice status line + bank indicator
   screen.level(3)
@@ -861,8 +861,10 @@ function draw_prog()
   end
 
   -- Settings below
+  local bpm = params:get("clock_tempo")
   local fields = {
     {"Steps", "E2/E3: select/change step"},
+    {"BPM", tostring(math.floor(bpm))},
     {"Beats/Step", tostring(prog.beats_per_step)},
     {"Key", NOTE_NAMES[vm.key_idx]},
     {"Scale", MusicUtil.SCALES[vm.scale_idx].name:sub(1, 12)},
@@ -1005,7 +1007,7 @@ function enc_prog(n, d)
       prog_step_cursor = util.clamp(prog_step_cursor + d, 1, math.max(1, #prog.steps))
     else
       -- Navigate fields
-      prog_cursor = util.clamp(prog_cursor + d, 1, 5)
+      prog_cursor = util.clamp(prog_cursor + d, 1, 6)
     end
   elseif n == 3 then
     if prog_cursor == 1 then
@@ -1016,9 +1018,13 @@ function enc_prog(n, d)
         prog.steps[prog_step_cursor] = deg
       end
     elseif prog_cursor == 2 then
+      -- BPM
+      local bpm = params:get("clock_tempo")
+      params:set("clock_tempo", util.clamp(bpm + d, 20, 300))
+    elseif prog_cursor == 3 then
       -- Beats per step
       prog.beats_per_step = util.clamp(prog.beats_per_step + d, 1, 16)
-    elseif prog_cursor == 3 then
+    elseif prog_cursor == 4 then
       -- Key
       local k = util.clamp(vm.key_idx + d, 1, 12)
       vm:set_key(k)
@@ -1026,7 +1032,7 @@ function enc_prog(n, d)
       if playing then
         vm:retrigger_all(bands, get_chord_root())
       end
-    elseif prog_cursor == 4 then
+    elseif prog_cursor == 5 then
       -- Scale
       local s = util.clamp(vm.scale_idx + d, 1, #MusicUtil.SCALES)
       vm:set_scale(s)
@@ -1034,7 +1040,7 @@ function enc_prog(n, d)
       if playing then
         vm:retrigger_all(bands, get_chord_root())
       end
-    elseif prog_cursor == 5 then
+    elseif prog_cursor == 6 then
       -- Quantize toggle
       vm.quantize = not vm.quantize
       params:set("quantize", vm.quantize and 1 or 2)
