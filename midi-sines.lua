@@ -125,16 +125,16 @@ function init()
   end)
 
   params:add_number("bass_ch", "Bass Ch", 1, 16, 7)
-  params:set_action("bass_ch", function(val) vm.pools.bass.ch = val end)
+  params:set_action("bass_ch", function(val) vm:set_primary_ch("bass", val) end)
 
   params:add_number("chord_ch", "Chord Ch", 1, 16, 4)
-  params:set_action("chord_ch", function(val) vm.pools.chord.ch = val end)
+  params:set_action("chord_ch", function(val) vm:set_primary_ch("chord", val) end)
 
   params:add_number("lead_ch", "Lead Ch", 1, 16, 3)
-  params:set_action("lead_ch", function(val) vm.pools.lead.ch = val end)
+  params:set_action("lead_ch", function(val) vm:set_primary_ch("lead", val) end)
 
   params:add_number("drum_ch", "Drum Ch", 1, 16, 15)
-  params:set_action("drum_ch", function(val) vm.drum_ch = val end)
+  params:set_action("drum_ch", function(val) vm.drum_channels[1] = val end)
 
   params:add_number("bass_voices", "Bass Voices", 1, 4, 1)
   params:set_action("bass_voices", function(val) vm.pools.bass.max = val end)
@@ -684,10 +684,10 @@ function draw_config()
   local rows = {
     {"MIDI Out:", out_port .. ": " .. out_name:sub(1, 16)},
     {"MIDIMIX:",  mm_port .. ": " .. mm_name:sub(1, 16)},
-    {"Bass:",     "ch " .. vm.pools.bass.ch .. "  max " .. vm.pools.bass.max .. "  " .. vm:pool_status("bass")},
-    {"Chord:",    "ch " .. vm.pools.chord.ch .. "  max " .. vm.pools.chord.max .. "  " .. vm:pool_status("chord")},
-    {"Lead:",     "ch " .. vm.pools.lead.ch .. "  max " .. vm.pools.lead.max .. "  " .. vm:pool_status("lead")},
-    {"Drum:",     "ch " .. vm.drum_ch .. "  K:" .. vm.drum_notes.kick .. " S:" .. vm.drum_notes.snare .. " H:" .. vm.drum_notes.hat},
+    {"Bass:",     "ch " .. vm:channels_str("bass") .. "  max " .. vm.pools.bass.max .. "  " .. vm:pool_status("bass")},
+    {"Chord:",    "ch " .. vm:channels_str("chord") .. "  max " .. vm.pools.chord.max .. "  " .. vm:pool_status("chord")},
+    {"Lead:",     "ch " .. vm:channels_str("lead") .. "  max " .. vm.pools.lead.max .. "  " .. vm:pool_status("lead")},
+    {"Drum:",     "ch " .. vm:drum_channels_str() .. "  K:" .. vm.drum_notes.kick .. " S:" .. vm.drum_notes.snare .. " H:" .. vm.drum_notes.hat},
   }
 
   for i, row in ipairs(rows) do
@@ -704,7 +704,7 @@ function draw_config()
   -- Help
   screen.level(3)
   screen.move(0, 64)
-  screen.text("E2:select  E3:change")
+  screen.text("E3:ch  K3:+ch  K1+K3:-ch")
 end
 
 -- ===== INPUT =====
@@ -835,20 +835,20 @@ function enc_config(n, d)
       local val = util.clamp(params:get("midimix_device") + d, 1, 16)
       params:set("midimix_device", val)
     elseif config_cursor == 3 then
-      local val = util.clamp(vm.pools.bass.ch + d, 1, 16)
-      vm.pools.bass.ch = val
+      local val = util.clamp(vm:get_primary_ch("bass") + d, 1, 16)
+      vm:set_primary_ch("bass", val)
       params:set("bass_ch", val)
     elseif config_cursor == 4 then
-      local val = util.clamp(vm.pools.chord.ch + d, 1, 16)
-      vm.pools.chord.ch = val
+      local val = util.clamp(vm:get_primary_ch("chord") + d, 1, 16)
+      vm:set_primary_ch("chord", val)
       params:set("chord_ch", val)
     elseif config_cursor == 5 then
-      local val = util.clamp(vm.pools.lead.ch + d, 1, 16)
-      vm.pools.lead.ch = val
+      local val = util.clamp(vm:get_primary_ch("lead") + d, 1, 16)
+      vm:set_primary_ch("lead", val)
       params:set("lead_ch", val)
     elseif config_cursor == 6 then
-      local val = util.clamp(vm.drum_ch + d, 1, 16)
-      vm.drum_ch = val
+      local val = util.clamp(vm.drum_channels[1] + d, 1, 16)
+      vm.drum_channels[1] = val
       params:set("drum_ch", val)
     end
   end
@@ -892,6 +892,45 @@ function key(n, z)
         prog_cursor = 1
       elseif not k1_held and prog_cursor == 1 then
         prog_cursor = 2
+      end
+    elseif page == 3 then
+      -- CONFIG page: K3 adds channel, K1+K3 removes last channel
+      local roles = {"bass", "chord", "lead"}
+      if config_cursor >= 3 and config_cursor <= 5 then
+        local role = roles[config_cursor - 2]
+        if k1_held then
+          -- Remove last extra channel
+          local chs = vm.pools[role].channels
+          if #chs > 1 then
+            local removed = chs[#chs]
+            vm:remove_channel(role, removed)
+            print(role .. ": removed ch " .. removed .. " -> " .. vm:channels_str(role))
+          end
+        else
+          -- Add next channel (primary + 1)
+          local primary = vm:get_primary_ch(role)
+          local new_ch = primary + #vm.pools[role].channels
+          if new_ch > 16 then new_ch = 1 end
+          if vm:add_channel(role, new_ch) then
+            print(role .. ": added ch " .. new_ch .. " -> " .. vm:channels_str(role))
+          end
+        end
+      elseif config_cursor == 6 then
+        -- Drum channels
+        if k1_held then
+          local chs = vm.drum_channels
+          if #chs > 1 then
+            local removed = chs[#chs]
+            vm:remove_drum_channel(removed)
+            print("drum: removed ch " .. removed .. " -> " .. vm:drum_channels_str())
+          end
+        else
+          local new_ch = vm.drum_channels[1] + #vm.drum_channels
+          if new_ch > 16 then new_ch = 1 end
+          if vm:add_drum_channel(new_ch) then
+            print("drum: added ch " .. new_ch .. " -> " .. vm:drum_channels_str())
+          end
+        end
       end
     end
   end

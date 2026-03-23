@@ -1,5 +1,6 @@
 -- voices.lua: Voice allocation, MIDI routing, scale management
 -- Handles voice pools, stealing, and note computation
+-- Supports multiple MIDI channels per role (layering)
 
 local MusicUtil = require "musicutil"
 
@@ -12,17 +13,18 @@ function Voices.new()
   self.midi = nil
 
   -- Voice pools: melodic roles
+  -- channels = array of MIDI channels (supports layering)
   self.pools = {
-    bass  = { max = 1, ch = 7,  active = {} },  -- Sub 37 mono
-    chord = { max = 6, ch = 4,  active = {} },  -- OB-6 6-voice
-    lead  = { max = 1, ch = 3,  active = {} },  -- Pro 3 mono
+    bass  = { max = 1, channels = {7},  active = {} },  -- Sub 37 mono
+    chord = { max = 6, channels = {4},  active = {} },  -- OB-6 6-voice
+    lead  = { max = 1, channels = {3},  active = {} },  -- Pro 3 mono
   }
 
   -- Drum config
-  self.drum_ch = 15
+  self.drum_channels = {15}  -- array for layering
   self.drum_notes = { kick = 0, snare = 1, hat = 2 }  -- Digitakt tracks 1-3
 
-  -- Currently sounding: band_idx -> { ch, note }
+  -- Currently sounding: band_idx -> { channels={}, note }
   self.sounding = {}
 
   -- Scale state
@@ -38,6 +40,92 @@ end
 
 function Voices:connect(device_num)
   self.midi = midi.connect(device_num or 1)
+end
+
+-- ===== CHANNEL MANAGEMENT =====
+
+-- Get the primary (first) channel for a role
+function Voices:get_primary_ch(role)
+  local pool = self.pools[role]
+  if pool and pool.channels[1] then
+    return pool.channels[1]
+  end
+  return 1
+end
+
+-- Add a channel to a role (up to 3 channels per role)
+function Voices:add_channel(role, ch)
+  local pool = self.pools[role]
+  if not pool then return false end
+  -- Check if already present
+  for _, c in ipairs(pool.channels) do
+    if c == ch then return false end
+  end
+  if #pool.channels >= 3 then return false end
+  table.insert(pool.channels, ch)
+  return true
+end
+
+-- Remove a channel from a role (can't remove the last one)
+function Voices:remove_channel(role, ch)
+  local pool = self.pools[role]
+  if not pool or #pool.channels <= 1 then return false end
+  for i = #pool.channels, 1, -1 do
+    if pool.channels[i] == ch then
+      table.remove(pool.channels, i)
+      return true
+    end
+  end
+  return false
+end
+
+-- Set the primary channel (replaces first entry)
+function Voices:set_primary_ch(role, ch)
+  local pool = self.pools[role]
+  if pool then
+    pool.channels[1] = ch
+  end
+end
+
+-- Get channel list string for display
+function Voices:channels_str(role)
+  local pool = self.pools[role]
+  if not pool then return "---" end
+  local parts = {}
+  for _, ch in ipairs(pool.channels) do
+    table.insert(parts, tostring(ch))
+  end
+  return table.concat(parts, "+")
+end
+
+-- Add drum channel
+function Voices:add_drum_channel(ch)
+  for _, c in ipairs(self.drum_channels) do
+    if c == ch then return false end
+  end
+  if #self.drum_channels >= 3 then return false end
+  table.insert(self.drum_channels, ch)
+  return true
+end
+
+-- Remove drum channel
+function Voices:remove_drum_channel(ch)
+  if #self.drum_channels <= 1 then return false end
+  for i = #self.drum_channels, 1, -1 do
+    if self.drum_channels[i] == ch then
+      table.remove(self.drum_channels, i)
+      return true
+    end
+  end
+  return false
+end
+
+function Voices:drum_channels_str()
+  local parts = {}
+  for _, ch in ipairs(self.drum_channels) do
+    table.insert(parts, tostring(ch))
+  end
+  return table.concat(parts, "+")
 end
 
 -- ===== SCALE =====
@@ -58,27 +146,19 @@ function Voices:set_scale(idx)
   self:build_scale()
 end
 
--- Get MIDI note for a chord_root_degree + band degree + octave
--- chord_root_degree: which scale degree is the current chord root (1-7)
--- band_degree: offset from chord root in scale degrees (1=root, 3=third, 5=fifth)
--- octave: octave offset (-3 to +3)
 function Voices:get_note(chord_root_degree, band_degree, octave)
   if self.quantize then
-    -- Scale-quantized: degrees map to scale steps
     local idx = (chord_root_degree - 1) + (band_degree - 1) + (octave * 7) + 1
-    -- Center around octave 4 (middle C area)
     idx = idx + 21
     idx = math.max(1, math.min(#self.scale_notes, idx))
     return self.scale_notes[idx]
   else
-    -- Chromatic: degrees map to semitones from root
-    local root_midi = (self.key_idx - 1) + 60  -- middle C
+    local root_midi = (self.key_idx - 1) + 60
     local semitones = (chord_root_degree - 1) + (band_degree - 1) + (octave * 12)
     return math.max(0, math.min(127, root_midi + semitones))
   end
 end
 
--- Get the note name for display
 function Voices:get_note_name(midi_note)
   if midi_note then
     return MusicUtil.note_num_to_name(midi_note, true)
@@ -86,24 +166,29 @@ function Voices:get_note_name(midi_note)
   return "---"
 end
 
--- Get chord name for current progression step
 function Voices:get_chord_name(chord_root_degree)
   local root_note = self:get_note(chord_root_degree, 1, 0)
   local name = MusicUtil.note_num_to_name(root_note, false)
   return name
 end
 
--- ===== MIDI =====
+-- ===== MIDI (multi-channel) =====
 
-function Voices:note_on(ch, note, vel)
+-- Send note on to all channels in a list
+function Voices:note_on_multi(channels, note, vel)
   if self.midi and note then
-    self.midi:note_on(note, vel, ch)
+    for _, ch in ipairs(channels) do
+      self.midi:note_on(note, vel, ch)
+    end
   end
 end
 
-function Voices:note_off(ch, note)
+-- Send note off to all channels in a list
+function Voices:note_off_multi(channels, note)
   if self.midi and note then
-    self.midi:note_off(note, 0, ch)
+    for _, ch in ipairs(channels) do
+      self.midi:note_off(note, 0, ch)
+    end
   end
 end
 
@@ -113,28 +198,31 @@ function Voices:program_change(ch, program)
   end
 end
 
--- Send PC to the channel for a given role
+-- Send PC to all channels for a role
 function Voices:send_pc(role, program)
   local pool = self.pools[role]
   if pool then
-    self:program_change(pool.ch, program)
+    for _, ch in ipairs(pool.channels) do
+      self:program_change(ch, program)
+    end
   elseif role == "kick" or role == "snare" or role == "hat" then
-    self:program_change(self.drum_ch, program)
+    for _, ch in ipairs(self.drum_channels) do
+      self:program_change(ch, program)
+    end
   end
 end
 
 -- ===== VOICE MANAGEMENT =====
 
--- Release a band's sounding note
+-- Release a band's sounding note (all its channels)
 function Voices:release(band_idx)
   local s = self.sounding[band_idx]
   if s then
-    self:note_off(s.ch, s.note)
+    self:note_off_multi(s.channels, s.note)
     self.sounding[band_idx] = nil
   end
 end
 
--- Remove band from its pool
 function Voices:remove_from_pool(band_idx, role)
   local pool = self.pools[role]
   if not pool then return end
@@ -146,7 +234,6 @@ function Voices:remove_from_pool(band_idx, role)
   end
 end
 
--- Check if band has a voice in its pool
 function Voices:has_voice(band_idx, role)
   local pool = self.pools[role]
   if not pool then return false end
@@ -156,8 +243,7 @@ function Voices:has_voice(band_idx, role)
   return false
 end
 
--- Activate a melodic band. Returns true if voice acquired.
--- bands_table: reference to the full bands array (for volume comparison during stealing)
+-- Activate a melodic band (sends to all channels for that role)
 function Voices:activate_melodic(band_idx, bands_table, chord_root_degree)
   local b = bands_table[band_idx]
   local role = b.role
@@ -171,16 +257,16 @@ function Voices:activate_melodic(band_idx, bands_table, chord_root_degree)
   -- Already has a voice? Just update note
   if self:has_voice(band_idx, role) then
     self:release(band_idx)
-    self:note_on(pool.ch, note_val, vel)
-    self.sounding[band_idx] = { ch = pool.ch, note = note_val }
+    self:note_on_multi(pool.channels, note_val, vel)
+    self.sounding[band_idx] = { channels = pool.channels, note = note_val }
     return true
   end
 
   -- Room in pool?
   if #pool.active < pool.max then
     table.insert(pool.active, band_idx)
-    self:note_on(pool.ch, note_val, vel)
-    self.sounding[band_idx] = { ch = pool.ch, note = note_val }
+    self:note_on_multi(pool.channels, note_val, vel)
+    self.sounding[band_idx] = { channels = pool.channels, note = note_val }
     return true
   end
 
@@ -197,36 +283,34 @@ function Voices:activate_melodic(band_idx, bands_table, chord_root_degree)
   end
 
   if min_idx then
-    -- Steal
     self:release(min_idx)
     pool.active[min_pool_pos] = band_idx
-    self:note_on(pool.ch, note_val, vel)
-    self.sounding[band_idx] = { ch = pool.ch, note = note_val }
+    self:note_on_multi(pool.channels, note_val, vel)
+    self.sounding[band_idx] = { channels = pool.channels, note = note_val }
     return true
   end
 
-  return false  -- all voices louder than us
+  return false
 end
 
--- Deactivate a band completely
 function Voices:deactivate(band_idx, role)
   self:release(band_idx)
   self:remove_from_pool(band_idx, role)
 end
 
--- Trigger a drum hit
+-- Trigger a drum hit (all drum channels)
 function Voices:trigger_drum(role, velocity)
   local note = self.drum_notes[role]
   if note then
-    self:note_on(self.drum_ch, note, velocity)
+    self:note_on_multi(self.drum_channels, note, velocity)
   end
 end
 
--- Release a drum hit
+-- Release a drum hit (all drum channels)
 function Voices:release_drum(role)
   local note = self.drum_notes[role]
   if note then
-    self:note_off(self.drum_ch, note)
+    self:note_off_multi(self.drum_channels, note)
   end
 end
 
@@ -239,8 +323,8 @@ function Voices:retrigger_all(bands_table, chord_root_degree)
         self:release(band_idx)
         local note_val = self:get_note(chord_root_degree, b.degree, b.octave)
         local vel = math.floor(b.vol * 127)
-        self:note_on(pool.ch, note_val, vel)
-        self.sounding[band_idx] = { ch = pool.ch, note = note_val }
+        self:note_on_multi(pool.channels, note_val, vel)
+        self.sounding[band_idx] = { channels = pool.channels, note = note_val }
       end
     end
   end
@@ -248,27 +332,35 @@ end
 
 -- Kill everything
 function Voices:all_off()
-  -- Release all sounding notes
   for band_idx, _ in pairs(self.sounding) do
     self:release(band_idx)
   end
   self.sounding = {}
 
-  -- Clear pools
   for _, pool in pairs(self.pools) do
     pool.active = {}
   end
 
   -- All notes off CC on all channels
   if self.midi then
+    local sent = {}
     for _, pool in pairs(self.pools) do
-      self.midi:cc(123, 0, pool.ch)
+      for _, ch in ipairs(pool.channels) do
+        if not sent[ch] then
+          self.midi:cc(123, 0, ch)
+          sent[ch] = true
+        end
+      end
     end
-    self.midi:cc(123, 0, self.drum_ch)
+    for _, ch in ipairs(self.drum_channels) do
+      if not sent[ch] then
+        self.midi:cc(123, 0, ch)
+        sent[ch] = true
+      end
+    end
   end
 end
 
--- Get status string for a pool
 function Voices:pool_status(role)
   local pool = self.pools[role]
   if pool then
