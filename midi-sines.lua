@@ -173,13 +173,13 @@ function init()
   end)
 
   -- Drum note params
-  params:add_number("kick_note", "Kick Note", 0, 127, 36)
+  params:add_number("kick_note", "Kick Note", 0, 127, 0)
   params:set_action("kick_note", function(val) vm.drum_notes.kick = val end)
 
-  params:add_number("snare_note", "Snare Note", 0, 127, 38)
+  params:add_number("snare_note", "Snare Note", 0, 127, 1)
   params:set_action("snare_note", function(val) vm.drum_notes.snare = val end)
 
-  params:add_number("hat_note", "Hat Note", 0, 127, 42)
+  params:add_number("hat_note", "Hat Note", 0, 127, 2)
   params:set_action("hat_note", function(val) vm.drum_notes.hat = val end)
 
   -- MIDIMIX params
@@ -279,16 +279,13 @@ function setup_midimix()
     end
   end
 
-  -- Knob row 2: octave
-  mm.on_octave = function(band_idx, octave)
+  -- Knob row 2: program change (sent to the band's synth channel)
+  mm.on_pc = function(band_idx, program)
     if band_idx >= 1 and band_idx <= NUM_BANDS then
-      bands[band_idx].octave = octave
+      local b = bands[band_idx]
+      vm:send_pc(b.role, program)
       cursor = band_idx
-      if bands[band_idx].vol > 0 and is_melodic(bands[band_idx].role) then
-        if vm:has_voice(band_idx, bands[band_idx].role) then
-          activate_band(band_idx)
-        end
-      end
+      print("PC " .. program .. " -> " .. b.role)
     end
   end
 

@@ -5,7 +5,7 @@
 --   Bank A = bands 1-8, Bank B = bands 9-16
 --   Faders 1-8: band volume
 --   Knob row 1: degree (1-7)
---   Knob row 2: octave (-3 to +3)
+--   Knob row 2: program change (0-127)
 --   Knob row 3: rate (0-16)
 --   Mute buttons: toggle band on/off (remembers volume)
 --   Solo buttons: cycle role
@@ -48,7 +48,7 @@ function MidiMix.new()
   -- Callbacks (set by main script)
   self.on_volume = nil       -- function(band_idx, vol)
   self.on_degree = nil       -- function(band_idx, degree)
-  self.on_octave = nil       -- function(band_idx, octave)
+  self.on_pc = nil            -- function(band_idx, program)
   self.on_rate = nil         -- function(band_idx, rate)
   self.on_mute_toggle = nil  -- function(band_idx)
   self.on_role_cycle = nil   -- function(band_idx)
@@ -148,12 +148,11 @@ function MidiMix:handle_cc(cc, val)
     return
   end
 
-  -- Knob row 2: octave
+  -- Knob row 2: program change (0-127)
   local k2 = self._knob2_map[cc]
   if k2 then
     local band = self:band_for(k2)
-    local octave = cc_to_range(val, -3, 3)
-    if self.on_octave then self.on_octave(band, octave) end
+    if self.on_pc then self.on_pc(band, val) end
     return
   end
 

@@ -20,7 +20,7 @@ function Voices.new()
 
   -- Drum config
   self.drum_ch = 15
-  self.drum_notes = { kick = 36, snare = 38, hat = 42 }
+  self.drum_notes = { kick = 0, snare = 1, hat = 2 }  -- Digitakt tracks 1-3
 
   -- Currently sounding: band_idx -> { ch, note }
   self.sounding = {}
@@ -104,6 +104,22 @@ end
 function Voices:note_off(ch, note)
   if self.midi and note then
     self.midi:note_off(note, 0, ch)
+  end
+end
+
+function Voices:program_change(ch, program)
+  if self.midi then
+    self.midi:program_change(program, ch)
+  end
+end
+
+-- Send PC to the channel for a given role
+function Voices:send_pc(role, program)
+  local pool = self.pools[role]
+  if pool then
+    self:program_change(pool.ch, program)
+  elseif role == "kick" or role == "snare" or role == "hat" then
+    self:program_change(self.drum_ch, program)
   end
 end
 
