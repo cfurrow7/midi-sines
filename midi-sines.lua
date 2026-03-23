@@ -76,6 +76,30 @@ local DRUM_PATTERNS = {
 }
 local NOTE_NAMES = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"}
 
+-- Preset chord progressions (scale degrees)
+local PROGRESSIONS = {
+  { name = "I-vi-IV-V",      steps = {1, 6, 4, 5} },      -- 50s / doo-wop
+  { name = "I-V-vi-IV",      steps = {1, 5, 6, 4} },      -- pop (Let It Be, No Woman No Cry)
+  { name = "I-IV-V-IV",      steps = {1, 4, 5, 4} },      -- rock (La Bamba, Twist and Shout)
+  { name = "ii-V-I",         steps = {2, 5, 1} },          -- jazz standard
+  { name = "I-IV-vi-V",      steps = {1, 4, 6, 5} },      -- pop ballad
+  { name = "vi-IV-I-V",      steps = {6, 4, 1, 5} },      -- pop/emo (Zombie, Save Tonight)
+  { name = "I-V-IV-V",       steps = {1, 5, 4, 5} },      -- rock anthem
+  { name = "I-iii-IV-V",     steps = {1, 3, 4, 5} },      -- Beatles
+  { name = "I-IV",           steps = {1, 4} },             -- blues shuffle
+  { name = "I-bVII-IV-I",    steps = {1, 7, 4, 1} },      -- mixolydian rock (Hey Jude, Sweet Home Alabama)
+  { name = "i-bVI-bIII-bVII",steps = {1, 6, 3, 7} },      -- epic minor (Radiohead, Depeche Mode)
+  { name = "i-iv-v",         steps = {1, 4, 5} },          -- minor blues
+  { name = "I-ii-iii-IV-V",  steps = {1, 2, 3, 4, 5} },   -- ascending
+  { name = "IV-V-iii-vi",    steps = {4, 5, 3, 6} },      -- royal road (J-pop)
+  { name = "i-bVII-bVI-V",   steps = {1, 7, 6, 5} },      -- Andalusian cadence (flamenco)
+  { name = "I-V-vi-iii-IV",  steps = {1, 5, 6, 3, 4} },   -- Pachelbel's Canon
+  { name = "ii-V-I-vi",      steps = {2, 5, 1, 6} },      -- jazz turnaround
+  { name = "I-vi-ii-V",      steps = {1, 6, 2, 5} },      -- rhythm changes
+  { name = "i-i-iv-V",       steps = {1, 1, 4, 5} },      -- minor drama
+  { name = "I",              steps = {1} },                 -- drone
+}
+
 -- Default band configs
 local DEFAULTS = {
   {role="bass",  degree=1, octave=-1, rate=0},
@@ -111,6 +135,7 @@ local prog = {
   steps = {1, 6, 4, 5},  -- I vi IV V
   position = 1,
   beats_per_step = 4,
+  name = "I-vi-IV-V",
 }
 
 -- UI
@@ -879,10 +904,14 @@ function draw_prog()
     screen.text(fields[i][1] .. ": " .. fields[i][2])
   end
 
-  -- Help
+  -- Prog name + help
   screen.level(3)
   screen.move(0, 64)
-  screen.text("K3:add step  K2+K3:del last")
+  if prog.name then
+    screen.text(prog.name .. "  K1+K3:random")
+  else
+    screen.text("K3:add step  K1+K3:random prog")
+  end
 end
 
 function draw_config()
@@ -1111,10 +1140,18 @@ function key(n, z)
       -- Cycle edit field
       edit_field = (edit_field % #EDIT_NAMES) + 1
     elseif page == 2 then
-      if k1_held and #prog.steps > 1 then
-        -- Delete last step
-        table.remove(prog.steps)
-        prog_step_cursor = util.clamp(prog_step_cursor, 1, #prog.steps)
+      if k1_held then
+        -- K1+K3: load random preset progression
+        local p = PROGRESSIONS[math.random(#PROGRESSIONS)]
+        prog.steps = {}
+        for _, s in ipairs(p.steps) do table.insert(prog.steps, s) end
+        prog.position = 1
+        prog_step_cursor = 1
+        prog.name = p.name
+        print("Prog: " .. p.name)
+        if playing then
+          vm:retrigger_all(bands, get_chord_root())
+        end
       else
         -- Add step after cursor
         local new_deg = prog.steps[prog_step_cursor] or 1
