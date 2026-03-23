@@ -121,6 +121,13 @@ local prog_cursor = 1     -- selected prog field
 local prog_step_cursor = 1
 local flash = {}          -- per-band note flash
 
+-- Per-role arp state (shared across bands on the same role)
+local arp_state = {
+  bass  = { pos = 0, last_note = nil, last_band = nil },
+  chord = { pos = 0, last_note = nil, last_band = nil },
+  lead  = { pos = 0, last_note = nil, last_band = nil },
+}
+
 -- ===== HELPERS =====
 
 -- Get MIDI device name by vport number (1-16)
@@ -591,20 +598,102 @@ function start_playing()
         end
       end
 
-      -- === MELODIC PULSE / ARP ===
+      -- === MELODIC: NON-ARP PULSE + GROUPED ARP ===
+
+      -- First pass: handle non-arp melodic bands (pulse/drone as before)
       for i = 1, NUM_BANDS do
         local b = bands[i]
-        if b.vol > 0 and is_melodic(b.role) and b.rate > 0 then
+        if b.vol > 0 and is_melodic(b.role) and b.arp == 1 and b.rate > 0 then
           if vm:has_voice(i, b.role) then
             if (sixteenth - 1) % b.rate == 0 then
-              -- Advance arp then note on
-              advance_arp(b)
               activate_band(i)
             elseif (sixteenth - 1) % b.rate == math.floor(b.rate / 2) then
-              -- Note off (half-way through cycle)
               vm:release(i)
             end
           end
+        end
+      end
+
+      -- Second pass: grouped arp per role
+      for _, role in ipairs({"bass", "chord", "lead"}) do
+        local arps = arp_state[role]
+
+        -- Collect all active arp bands for this role, sorted by degree
+        local arp_bands = {}
+        local fastest_rate = 16
+        for i = 1, NUM_BANDS do
+          local b = bands[i]
+          if b.vol > 0 and b.role == role and b.arp > 1 and b.rate > 0 then
+            table.insert(arp_bands, i)
+            if b.rate < fastest_rate then fastest_rate = b.rate end
+          end
+        end
+        -- Sort by degree so arp order is predictable
+        table.sort(arp_bands, function(a, b_idx)
+          return bands[a].degree < bands[b_idx].degree
+        end)
+
+        if #arp_bands > 0 then
+          -- Use fastest rate among arp bands for the step timing
+          if (sixteenth - 1) % fastest_rate == 0 then
+            -- Release previous arp note
+            if arps.last_band then
+              vm:release(arps.last_band)
+            end
+
+            -- Get arp mode from first band (they share the mode)
+            local mode = bands[arp_bands[1]].arp
+            local num_notes = #arp_bands
+            local total_steps = num_notes * ARP_OCTAVES
+
+            -- Pick which note + octave
+            local step_idx
+            if mode == 5 then
+              -- RANDOM
+              step_idx = math.random(0, total_steps - 1)
+            elseif mode == 3 then
+              -- DOWN
+              step_idx = (total_steps - 1) - (arps.pos % total_steps)
+            elseif mode == 4 then
+              -- UP/DN bounce
+              local cycle = (total_steps - 1) * 2
+              if cycle < 1 then cycle = 1 end
+              local p = arps.pos % cycle
+              if p < total_steps then
+                step_idx = p
+              else
+                step_idx = cycle - p
+              end
+            else
+              -- UP (default)
+              step_idx = arps.pos % total_steps
+            end
+
+            local note_idx = (step_idx % num_notes) + 1
+            local oct_offset = math.floor(step_idx / num_notes)
+            local band_idx = arp_bands[note_idx]
+            local b = bands[band_idx]
+
+            -- Play this note at the octave offset
+            local orig_oct = b.octave
+            b.octave = math.max(-3, math.min(3, b.octave + oct_offset))
+            vm:activate_melodic(band_idx, bands, get_chord_root())
+            b.octave = orig_oct
+            flash[band_idx] = 4
+
+            arps.last_band = band_idx
+            arps.pos = arps.pos + 1
+          elseif (sixteenth - 1) % fastest_rate == math.floor(fastest_rate / 2) then
+            -- Note off halfway
+            if arps.last_band then
+              vm:release(arps.last_band)
+              arps.last_band = nil
+            end
+          end
+        else
+          -- No arp bands: reset state
+          arps.pos = 0
+          arps.last_band = nil
         end
       end
 
