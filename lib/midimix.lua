@@ -33,6 +33,7 @@ local BANK_RIGHT_NOTE = 26
 -- Some MIDIMIX units use CC for bank buttons instead of notes
 local BANK_LEFT_CC = 25
 local BANK_RIGHT_CC = 26
+local SEND_ALL_NOTE = 27  -- solo button above master fader = PANIC
 
 -- Roles to cycle through
 local ROLES = {"bass", "chord", "lead", "kick", "snare", "hat"}
@@ -55,6 +56,7 @@ function MidiMix.new()
   self.on_beats = nil        -- function(beats_per_step)
   self.on_bank = nil         -- function(bank)  -- 0 or 1
   self.on_rec = nil          -- function(band_idx)  -- rec arm, spare button
+  self.on_panic = nil        -- function()  -- SEND ALL button = panic
 
   -- Build reverse lookup tables
   self._fader_map = {}
@@ -202,6 +204,12 @@ function MidiMix:handle_note(note)
   if rec_ch then
     local band = self:band_for(rec_ch)
     if self.on_rec then self.on_rec(band) end
+    return
+  end
+
+  -- SEND ALL / solo above master = PANIC
+  if note == SEND_ALL_NOTE then
+    if self.on_panic then self.on_panic() end
     return
   end
 

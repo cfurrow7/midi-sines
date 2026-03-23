@@ -370,6 +370,18 @@ function setup_midimix()
     end
     mm:update_leds(bands)
   end
+
+  -- SEND ALL button (above master fader) = PANIC
+  mm.on_panic = function()
+    print("PANIC! All notes off")
+    stop_playing()
+    -- Zero all band volumes
+    for i = 1, NUM_BANDS do
+      bands[i].vol = 0
+    end
+    vm:all_off()
+    mm:update_leds(bands)
+  end
 end
 
 -- ===== FLASH =====
