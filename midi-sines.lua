@@ -439,7 +439,21 @@ function setup_midimix()
     end
   end
 
-  -- SOLO button = play/stop toggle
+  -- SOLO + knob row 1: global octave shift for all bands
+  mm.on_global_octave = function(octave)
+    for i = 1, NUM_BANDS do
+      local b = bands[i]
+      if is_melodic(b.role) then
+        b.octave = octave
+        if b.vol > 0 and vm:has_voice(i, b.role) then
+          activate_band(i)
+        end
+      end
+    end
+    print("Global octave: " .. octave)
+  end
+
+  -- SOLO button (tap, not held as modifier) = play/stop toggle
   mm.on_solo = function()
     if playing then
       stop_playing()

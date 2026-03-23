@@ -58,6 +58,9 @@ function MidiMix.new()
   self.on_rec = nil          -- function(band_idx)  -- rec arm button
   self.on_panic = nil        -- function()  -- SEND ALL button
   self.on_solo = nil         -- function()  -- SOLO button
+  self.on_global_octave = nil -- function(octave) -- SOLO+knob row 1
+
+  self.solo_held = false     -- track SOLO button hold state
 
   -- Build reverse lookup tables
   self._fader_map = {}
@@ -118,7 +121,9 @@ function MidiMix:handle_event(data)
   if msg.type == "cc" then
     self:handle_cc(msg.cc, msg.val)
   elseif msg.type == "note_on" and msg.vel > 0 then
-    self:handle_note(msg.note)
+    self:handle_note_on(msg.note)
+  elseif msg.type == "note_off" or (msg.type == "note_on" and msg.vel == 0) then
+    self:handle_note_off(msg.note)
   end
 end
 
@@ -139,12 +144,18 @@ function MidiMix:handle_cc(cc, val)
     return
   end
 
-  -- Knob row 1: degree
+  -- Knob row 1: degree (or global octave if SOLO held)
   local k1 = self._knob1_map[cc]
   if k1 then
-    local band = self:band_for(k1)
-    local degree = cc_to_range(val, 1, 7)
-    if self.on_degree then self.on_degree(band, degree) end
+    if self.solo_held then
+      self._solo_used_as_modifier = true
+      local octave = cc_to_range(val, -3, 3)
+      if self.on_global_octave then self.on_global_octave(octave) end
+    else
+      local band = self:band_for(k1)
+      local degree = cc_to_range(val, 1, 7)
+      if self.on_degree then self.on_degree(band, degree) end
+    end
     return
   end
 
@@ -180,7 +191,14 @@ function MidiMix:handle_cc(cc, val)
   end
 end
 
-function MidiMix:handle_note(note)
+function MidiMix:handle_note_on(note)
+  -- SOLO button: track held state, fire callback on release (if not used as modifier)
+  if note == SOLO_NOTE then
+    self.solo_held = true
+    self._solo_used_as_modifier = false
+    return
+  end
+
   -- Mute buttons: toggle band
   local mute_ch = self._mute_map[note]
   if mute_ch then
@@ -203,12 +221,6 @@ function MidiMix:handle_note(note)
     return
   end
 
-  -- SOLO button
-  if note == SOLO_NOTE then
-    if self.on_solo then self.on_solo() end
-    return
-  end
-
   -- Bank buttons (note variant)
   if note == BANK_LEFT_NOTE then
     self.bank = 0
@@ -221,6 +233,17 @@ function MidiMix:handle_note(note)
     if self.on_bank then self.on_bank(1) end
     self:update_leds()
     return
+  end
+end
+
+function MidiMix:handle_note_off(note)
+  if note == SOLO_NOTE then
+    -- If SOLO wasn't used as a modifier (with a knob), fire play/stop
+    if not self._solo_used_as_modifier then
+      if self.on_solo then self.on_solo() end
+    end
+    self.solo_held = false
+    self._solo_used_as_modifier = false
   end
 end
 
