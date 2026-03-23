@@ -378,26 +378,6 @@ function setup_midimix()
     end
   end
 
-  -- Solo buttons: cycle role
-  mm.on_role_cycle = function(band_idx)
-    if band_idx >= 1 and band_idx <= NUM_BANDS then
-      local b = bands[band_idx]
-      local idx = 1
-      for i, r in ipairs(ROLES) do
-        if r == b.role then idx = i; break end
-      end
-      local old_role = b.role
-      idx = (idx % #ROLES) + 1
-      local new_role = ROLES[idx]
-      if b.vol > 0 then deactivate_band(band_idx) end
-      b.role = new_role
-      if b.vol > 0 and is_melodic(new_role) then
-        activate_band(band_idx)
-      end
-      cursor = band_idx
-    end
-  end
-
   -- Master fader: beats per step
   mm.on_beats = function(beats)
     prog.beats_per_step = beats
@@ -427,7 +407,17 @@ function setup_midimix()
     end
   end
 
-  -- SEND ALL button (above master fader) = PANIC
+  -- SOLO button = play/stop toggle
+  mm.on_solo = function()
+    if playing then
+      stop_playing()
+    else
+      start_playing()
+    end
+    mm:update_leds(bands)
+  end
+
+  -- SEND ALL button = PANIC
   mm.on_panic = function()
     print("PANIC! All notes off")
     stop_playing()

@@ -24,16 +24,17 @@ local KNOB_ROW1 = {16, 20, 24, 28, 46, 50, 54, 58}  -- degree
 local KNOB_ROW2 = {17, 21, 25, 29, 47, 51, 55, 59}  -- octave
 local KNOB_ROW3 = {18, 22, 26, 30, 48, 52, 56, 60}  -- rate
 
--- MIDIMIX button notes (every 3rd note per channel)
+-- MIDIMIX button notes
+-- Physical buttons per channel: MUTE + REC ARM only (no solo buttons)
 local MUTE_NOTES = {1, 4, 7, 10, 13, 16, 19, 22}
-local SOLO_NOTES = {2, 5, 8, 11, 14, 17, 20, 23}
 local REC_NOTES  = {3, 6, 9, 12, 15, 18, 21, 24}
 local BANK_LEFT_NOTE = 25
 local BANK_RIGHT_NOTE = 26
 -- Some MIDIMIX units use CC for bank buttons instead of notes
 local BANK_LEFT_CC = 25
 local BANK_RIGHT_CC = 26
-local SEND_ALL_NOTE = 27  -- solo button above master fader = PANIC
+local SEND_ALL_NOTE = 27  -- SEND ALL button
+local SOLO_NOTE = 28      -- SOLO button (bottom right, below bank buttons)
 
 -- Roles to cycle through
 local ROLES = {"bass", "chord", "lead", "kick", "snare", "hat"}
@@ -49,14 +50,14 @@ function MidiMix.new()
   -- Callbacks (set by main script)
   self.on_volume = nil       -- function(band_idx, vol)
   self.on_degree = nil       -- function(band_idx, degree)
-  self.on_pc = nil            -- function(band_idx, program)
+  self.on_pc = nil           -- function(band_idx, program)
   self.on_rate = nil         -- function(band_idx, rate)
   self.on_mute_toggle = nil  -- function(band_idx)
-  self.on_role_cycle = nil   -- function(band_idx)
   self.on_beats = nil        -- function(beats_per_step)
   self.on_bank = nil         -- function(bank)  -- 0 or 1
-  self.on_rec = nil          -- function(band_idx)  -- rec arm, spare button
-  self.on_panic = nil        -- function()  -- SEND ALL button = panic
+  self.on_rec = nil          -- function(band_idx)  -- rec arm button
+  self.on_panic = nil        -- function()  -- SEND ALL button
+  self.on_solo = nil         -- function()  -- SOLO button
 
   -- Build reverse lookup tables
   self._fader_map = {}
@@ -64,7 +65,6 @@ function MidiMix.new()
   self._knob2_map = {}
   self._knob3_map = {}
   self._mute_map = {}
-  self._solo_map = {}
   self._rec_map = {}
 
   for i = 1, 8 do
@@ -73,7 +73,6 @@ function MidiMix.new()
     self._knob2_map[KNOB_ROW2[i]] = i
     self._knob3_map[KNOB_ROW3[i]] = i
     self._mute_map[MUTE_NOTES[i]] = i
-    self._solo_map[SOLO_NOTES[i]] = i
     self._rec_map[REC_NOTES[i]] = i
   end
 
@@ -183,7 +182,7 @@ function MidiMix:handle_cc(cc, val)
 end
 
 function MidiMix:handle_note(note)
-  -- Mute buttons: toggle band volume
+  -- Mute buttons: toggle band
   local mute_ch = self._mute_map[note]
   if mute_ch then
     local band = self:band_for(mute_ch)
@@ -191,15 +190,7 @@ function MidiMix:handle_note(note)
     return
   end
 
-  -- Solo buttons: cycle role
-  local solo_ch = self._solo_map[note]
-  if solo_ch then
-    local band = self:band_for(solo_ch)
-    if self.on_role_cycle then self.on_role_cycle(band) end
-    return
-  end
-
-  -- Rec arm buttons: spare (could be used for anything)
+  -- Rec arm buttons
   local rec_ch = self._rec_map[note]
   if rec_ch then
     local band = self:band_for(rec_ch)
@@ -207,9 +198,15 @@ function MidiMix:handle_note(note)
     return
   end
 
-  -- SEND ALL / solo above master = PANIC
+  -- SEND ALL = PANIC
   if note == SEND_ALL_NOTE then
     if self.on_panic then self.on_panic() end
+    return
+  end
+
+  -- SOLO button
+  if note == SOLO_NOTE then
+    if self.on_solo then self.on_solo() end
     return
   end
 
