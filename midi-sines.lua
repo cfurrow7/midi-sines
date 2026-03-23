@@ -30,7 +30,50 @@ local ROLES = {"bass", "chord", "lead", "kick", "snare", "hat"}
 local ROLE_SHORT = {bass="B", chord="C", lead="L", kick="K", snare="S", hat="H"}
 local ROLE_COLORS = {bass=12, chord=15, lead=10, kick=6, snare=5, hat=4}
 local NUMERALS = {"I", "ii", "iii", "IV", "V", "vi", "vii"}
-local EDIT_NAMES = {"VOL", "ROLE", "DEG", "OCT", "RATE"}
+local EDIT_NAMES = {"VOL", "ROLE", "DEG", "OCT", "RATE", "ARP"}
+local ARP_MODES = {"OFF", "UP", "DN", "UPDN", "RAND"}
+local ARP_STEPS = 7  -- arp cycles through 7 scale degrees
+
+-- Drum patterns: 16-step arrays (1=hit, 0=rest)
+-- Fader position selects pattern (0=off, then patterns by intensity/complexity)
+local DRUM_PATTERNS = {
+  kick = {
+    {1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0},  -- four on the floor
+    {1,0,0,0, 0,0,1,0, 1,0,0,0, 0,0,1,0},  -- house kick
+    {1,0,0,1, 0,0,1,0, 0,0,1,0, 0,0,0,0},  -- syncopated
+    {1,0,0,0, 0,0,0,0, 1,0,1,0, 0,0,0,0},  -- hip hop
+    {1,0,1,0, 0,0,0,0, 1,0,0,0, 0,0,1,0},  -- breakbeat
+    {1,0,0,0, 1,0,0,0, 0,0,1,0, 0,0,0,0},  -- reggaeton
+    {1,0,0,0, 0,0,1,0, 0,0,1,0, 0,1,0,0},  -- funk
+    {1,0,0,1, 0,0,0,1, 0,0,1,0, 0,0,0,0},  -- dnb
+    {1,1,0,0, 1,0,0,0, 1,1,0,0, 1,0,0,0},  -- gabber
+    {1,0,0,0, 1,0,0,1, 0,0,1,0, 1,0,0,1},  -- techno
+  },
+  snare = {
+    {0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0},  -- 2 and 4
+    {0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,1},  -- 2 and 4 + pickup
+    {0,0,0,0, 1,0,0,1, 0,0,0,0, 1,0,0,0},  -- ghost note
+    {0,0,0,0, 1,0,0,0, 0,0,1,0, 1,0,0,0},  -- offbeat hit
+    {0,0,1,0, 1,0,0,0, 0,0,1,0, 1,0,0,0},  -- funk snare
+    {0,0,0,0, 1,0,1,0, 0,0,0,0, 1,0,1,0},  -- double hit
+    {0,0,0,0, 1,0,0,1, 0,1,0,0, 1,0,0,0},  -- syncopated
+    {0,1,0,0, 1,0,0,0, 0,1,0,0, 1,0,0,0},  -- broken
+    {0,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,1,0},  -- dnb snare
+    {0,0,1,0, 1,0,1,0, 0,0,1,0, 1,0,1,0},  -- busy
+  },
+  hat = {
+    {1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0},  -- 8ths
+    {1,1,1,1, 1,1,1,1, 1,1,1,1, 1,1,1,1},  -- 16ths
+    {1,0,0,1, 1,0,0,1, 1,0,0,1, 1,0,0,1},  -- offbeat
+    {1,0,1,0, 1,0,1,1, 1,0,1,0, 1,0,1,1},  -- shuffle
+    {0,0,1,0, 0,0,1,0, 0,0,1,0, 0,0,1,0},  -- upbeat only
+    {1,0,1,1, 1,0,1,1, 1,0,1,1, 1,0,1,1},  -- open hat feel
+    {1,1,0,1, 1,1,0,1, 1,1,0,1, 1,1,0,1},  -- syncopated
+    {1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0},  -- quarters
+    {1,1,1,0, 1,1,1,0, 1,1,1,0, 1,1,1,0},  -- triplet feel
+    {1,0,1,1, 0,1,1,0, 1,1,0,1, 1,0,1,0},  -- breakbeat hat
+  },
+}
 local NOTE_NAMES = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"}
 
 -- Default band configs
@@ -46,11 +89,11 @@ local DEFAULTS = {
   {role="lead",  degree=1, octave=1,  rate=0},
   {role="lead",  degree=5, octave=1,  rate=0},
   {role="lead",  degree=3, octave=2,  rate=0},
-  {role="kick",  degree=1, octave=0,  rate=4},
-  {role="kick",  degree=1, octave=0,  rate=8},
-  {role="snare", degree=1, octave=0,  rate=8},
-  {role="hat",   degree=1, octave=0,  rate=2},
-  {role="hat",   degree=1, octave=0,  rate=1},
+  {role="kick",  degree=1, octave=0,  rate=4,  pattern=1},  -- four on the floor
+  {role="kick",  degree=1, octave=0,  rate=8,  pattern=2},  -- house kick
+  {role="snare", degree=1, octave=0,  rate=8,  pattern=1},  -- 2 and 4
+  {role="hat",   degree=1, octave=0,  rate=2,  pattern=1},  -- 8ths
+  {role="hat",   degree=1, octave=0,  rate=1,  pattern=4},  -- shuffle
 }
 
 -- ===== STATE =====
@@ -111,6 +154,10 @@ function init()
       octave = d.octave,
       rate = d.rate,
       vol = 0,
+      arp = 1,       -- 1=OFF, 2=UP, 3=DN, 4=UPDN, 5=RAND
+      arp_pos = 0,   -- current position in arp sequence
+      arp_dir = 1,   -- 1=ascending, -1=descending (for UPDN mode)
+      pattern = d.pattern or 0,  -- drum pattern index (0=use rate, 1-10=preset pattern)
     }
     flash[i] = 0
   end
@@ -259,7 +306,7 @@ end
 -- ===== MIDIMIX CALLBACKS =====
 
 function setup_midimix()
-  -- Faders: band volume
+  -- Faders: band volume (all bands) + drum pattern selection via knob row 3
   mm.on_volume = function(band_idx, vol)
     if band_idx >= 1 and band_idx <= NUM_BANDS then
       set_band_vol(band_idx, vol)
@@ -291,17 +338,24 @@ function setup_midimix()
     end
   end
 
-  -- Knob row 3: rate
+  -- Knob row 3: rate (melodic) / pattern select (drums)
   mm.on_rate = function(band_idx, rate)
     if band_idx >= 1 and band_idx <= NUM_BANDS then
-      bands[band_idx].rate = rate
-      cursor = band_idx
-      -- If going back to drone, retrigger
-      if rate == 0 and bands[band_idx].vol > 0 and is_melodic(bands[band_idx].role) then
-        if vm:has_voice(band_idx, bands[band_idx].role) then
-          activate_band(band_idx)
+      local b = bands[band_idx]
+      if is_drum(b.role) then
+        -- Map 0-16 range to pattern 0-10 (0=off/rate mode, 1-10=patterns)
+        b.pattern = math.min(rate, 10)
+        print("Band " .. band_idx .. " " .. b.role .. " pattern: " .. b.pattern)
+      else
+        b.rate = rate
+        -- If going back to drone, retrigger
+        if rate == 0 and b.vol > 0 and is_melodic(b.role) then
+          if vm:has_voice(band_idx, b.role) then
+            activate_band(band_idx)
+          end
         end
       end
+      cursor = band_idx
     end
   end
 
@@ -361,16 +415,16 @@ function setup_midimix()
     mm:update_leds(bands)
   end
 
-  -- Rec arm buttons: play/stop toggle per band
-  -- (using as a secondary function: start/stop the clock)
+  -- Rec arm buttons: cycle arp mode per band
   mm.on_rec = function(band_idx)
-    -- Any rec arm button toggles play/stop
-    if playing then
-      stop_playing()
-    else
-      start_playing()
+    if band_idx >= 1 and band_idx <= NUM_BANDS then
+      local b = bands[band_idx]
+      b.arp = (b.arp % #ARP_MODES) + 1
+      b.arp_pos = 0
+      b.arp_dir = 1
+      cursor = band_idx
+      print("Band " .. band_idx .. " arp: " .. ARP_MODES[b.arp])
     end
-    mm:update_leds(bands)
   end
 
   -- SEND ALL button (above master fader) = PANIC
@@ -408,10 +462,51 @@ function get_chord_root()
   return prog.steps[prog.position] or 1
 end
 
+-- Get the arp-modified degree for a band
+function get_arp_degree(b)
+  if b.arp == 1 then return b.degree end  -- OFF: use base degree
+
+  local offset = 0
+  if b.arp == 2 then
+    -- UP: step through degrees ascending
+    offset = b.arp_pos % ARP_STEPS
+  elseif b.arp == 3 then
+    -- DOWN: step through degrees descending
+    offset = -(b.arp_pos % ARP_STEPS)
+  elseif b.arp == 4 then
+    -- UP/DN: bounce
+    local cycle = ARP_STEPS * 2 - 2  -- e.g. 12 for 7 steps
+    local pos = b.arp_pos % cycle
+    if pos < ARP_STEPS then
+      offset = pos
+    else
+      offset = cycle - pos
+    end
+  elseif b.arp == 5 then
+    -- RANDOM: random degree offset 0-6
+    offset = math.random(0, ARP_STEPS - 1)
+  end
+
+  -- Wrap degree within 1-7
+  local deg = ((b.degree - 1 + offset) % 7) + 1
+  return deg
+end
+
+-- Advance arp position for a band (call each pulse)
+function advance_arp(b)
+  if b.arp > 1 then
+    b.arp_pos = b.arp_pos + 1
+  end
+end
+
 function activate_band(i)
   local b = bands[i]
   if is_melodic(b.role) then
+    -- Temporarily apply arp degree
+    local orig_deg = b.degree
+    b.degree = get_arp_degree(b)
     vm:activate_melodic(i, bands, get_chord_root())
+    b.degree = orig_deg
     flash[i] = 4
   end
 end
@@ -469,12 +564,25 @@ function start_playing()
       -- === DRUMS ===
       for i = 1, NUM_BANDS do
         local b = bands[i]
-        if b.vol > 0 and is_drum(b.role) and b.rate > 0 then
-          if (sixteenth - 1) % b.rate == 0 then
+        if b.vol > 0 and is_drum(b.role) then
+          local should_hit = false
+
+          if b.pattern > 0 then
+            -- Use preset pattern
+            local pats = DRUM_PATTERNS[b.role]
+            if pats and pats[b.pattern] then
+              local step = ((sixteenth - 1) % 16) + 1
+              should_hit = (pats[b.pattern][step] == 1)
+            end
+          elseif b.rate > 0 then
+            -- Fallback: simple rate division
+            should_hit = ((sixteenth - 1) % b.rate == 0)
+          end
+
+          if should_hit then
             local vel = math.floor(b.vol * 127)
             vm:trigger_drum(b.role, vel)
             flash[i] = 3
-            -- Schedule note off
             clock.run(function()
               clock.sleep(0.05)
               vm:release_drum(b.role)
@@ -483,13 +591,14 @@ function start_playing()
         end
       end
 
-      -- === MELODIC PULSE ===
+      -- === MELODIC PULSE / ARP ===
       for i = 1, NUM_BANDS do
         local b = bands[i]
         if b.vol > 0 and is_melodic(b.role) and b.rate > 0 then
           if vm:has_voice(i, b.role) then
             if (sixteenth - 1) % b.rate == 0 then
-              -- Note on
+              -- Advance arp then note on
+              advance_arp(b)
               activate_band(i)
             elseif (sixteenth - 1) % b.rate == math.floor(b.rate / 2) then
               -- Note off (half-way through cycle)
@@ -585,10 +694,12 @@ function draw_bands()
       screen.stroke()
     end
 
-    -- Role label below bar
+    -- Role label below bar (show arp indicator if active)
     screen.level(is_selected and 15 or 4)
     screen.move(x + 1, bar_y + 8)
-    screen.text(ROLE_SHORT[b.role] or "?")
+    local label = ROLE_SHORT[b.role] or "?"
+    if b.arp > 1 then label = label .. "~" end  -- ~ means arp active
+    screen.text(label)
   end
 
   -- Bottom info line
@@ -605,10 +716,17 @@ function draw_bands()
   screen.move(42, 58)
   screen.text(numeral)
 
-  -- Show what E3 controls
+  -- Show what E3 controls (include arp/pattern info)
   screen.level(6)
   screen.move(58, 58)
-  screen.text("E3:" .. EDIT_NAMES[edit_field])
+  local b_sel = bands[cursor]
+  local edit_label = EDIT_NAMES[edit_field]
+  if edit_field == 5 and is_drum(b_sel.role) then
+    edit_label = "PAT:" .. b_sel.pattern
+  elseif edit_field == 6 then
+    edit_label = "ARP:" .. ARP_MODES[b_sel.arp]
+  end
+  screen.text("E3:" .. edit_label)
 
   -- Play indicator
   screen.level(playing and 15 or 3)
@@ -770,15 +888,23 @@ function enc_bands(n, d)
         activate_band(cursor)
       end
     elseif edit_field == 5 then
-      -- Rate (0=drone, 1-16=pulse division in 16ths)
-      b.rate = util.clamp(b.rate + d, 0, 16)
-      -- If switching from drone to pulse or vice versa while active
-      if b.vol > 0 and is_melodic(b.role) and vm:has_voice(cursor, b.role) then
-        if b.rate == 0 then
-          -- Back to drone: make sure note is on
-          activate_band(cursor)
+      if is_drum(b.role) then
+        -- Drum: cycle through patterns
+        b.pattern = util.clamp(b.pattern + d, 0, 10)
+      else
+        -- Melodic: rate (0=drone, 1-16=pulse division in 16ths)
+        b.rate = util.clamp(b.rate + d, 0, 16)
+        if b.vol > 0 and is_melodic(b.role) and vm:has_voice(cursor, b.role) then
+          if b.rate == 0 then
+            activate_band(cursor)
+          end
         end
       end
+    elseif edit_field == 6 then
+      -- Arp mode
+      b.arp = util.clamp(b.arp + d, 1, #ARP_MODES)
+      b.arp_pos = 0
+      b.arp_dir = 1
     end
   end
 end
