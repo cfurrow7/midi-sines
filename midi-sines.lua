@@ -129,6 +129,7 @@ local playing = false
 local main_clock = nil
 local redraw_clock = nil
 local sixteenth = 0       -- 16th note counter
+local free_running = true -- clock always runs (arp/drums without play)
 
 -- Progression
 local prog = {
@@ -253,6 +254,11 @@ function init()
     prog.beats_per_step = val
   end)
 
+  params:add_option("free_running", "Free Running", {"On", "Off"}, 1)
+  params:set_action("free_running", function(val)
+    free_running = (val == 1)
+  end)
+
   -- Drum note params
   params:add_number("kick_note", "Kick Note", 0, 127, 0)
   params:set_action("kick_note", function(val) vm.drum_notes.kick = val end)
@@ -320,6 +326,9 @@ function init()
   else
     print("MIDIMIX not auto-detected. Go to CONFIG page (E1) and set device with E3.")
   end
+
+  -- Start the main clock (always running for arp/drums/pulse)
+  start_clock()
 
   -- Redraw clock
   redraw_clock = clock.run(function()
@@ -594,38 +603,26 @@ function set_band_vol(i, vol)
   -- Drums handled by the clock
 end
 
-function start_playing()
-  if playing then return end
-  playing = true
-  sixteenth = 0
-  prog.position = 1
-
-  -- Activate all bands that have volume > 0
-  for i = 1, NUM_BANDS do
-    if bands[i].vol > 0 and is_melodic(bands[i].role) then
-      activate_band(i)
-    end
-  end
-
+-- Main clock: always running, handles drums/arp/pulse/progression
+function start_clock()
+  if main_clock then return end
   main_clock = clock.run(function()
-    while playing do
+    while true do
       sixteenth = sixteenth + 1
 
-      -- === DRUMS ===
+      -- === DRUMS === (only when playing, or free_running)
       for i = 1, NUM_BANDS do
         local b = bands[i]
-        if b.vol > 0 and is_drum(b.role) then
+        if b.vol > 0 and is_drum(b.role) and (playing or free_running) then
           local should_hit = false
 
           if b.pattern > 0 then
-            -- Use preset pattern
             local pats = DRUM_PATTERNS[b.role]
             if pats and pats[b.pattern] then
               local step = ((sixteenth - 1) % 16) + 1
               should_hit = (pats[b.pattern][step] == 1)
             end
           elseif b.rate > 0 then
-            -- Fallback: simple rate division
             should_hit = ((sixteenth - 1) % b.rate == 0)
           end
 
@@ -641,12 +638,10 @@ function start_playing()
         end
       end
 
-      -- === MELODIC: NON-ARP PULSE + GROUPED ARP ===
-
-      -- First pass: handle non-arp melodic bands (pulse/drone as before)
+      -- === MELODIC: NON-ARP PULSE ===
       for i = 1, NUM_BANDS do
         local b = bands[i]
-        if b.vol > 0 and is_melodic(b.role) and b.arp == 1 and b.rate > 0 then
+        if b.vol > 0 and is_melodic(b.role) and b.arp == 1 and b.rate > 0 and (playing or free_running) then
           if vm:has_voice(i, b.role) then
             if (sixteenth - 1) % b.rate == 0 then
               activate_band(i)
@@ -657,11 +652,11 @@ function start_playing()
         end
       end
 
-      -- Second pass: grouped arp per role
+      -- === GROUPED ARP (runs when playing or free_running) ===
+      if playing or free_running then
       for _, role in ipairs({"bass", "chord", "lead"}) do
         local arps = arp_state[role]
 
-        -- Collect all active arp bands for this role, sorted by degree
         local arp_bands = {}
         local fastest_rate = 16
         for i = 1, NUM_BANDS do
@@ -671,34 +666,26 @@ function start_playing()
             if b.rate < fastest_rate then fastest_rate = b.rate end
           end
         end
-        -- Sort by degree so arp order is predictable
         table.sort(arp_bands, function(a, b_idx)
           return bands[a].degree < bands[b_idx].degree
         end)
 
         if #arp_bands > 0 then
-          -- Use fastest rate among arp bands for the step timing
           if (sixteenth - 1) % fastest_rate == 0 then
-            -- Release previous arp note
             if arps.last_band then
               vm:release(arps.last_band)
             end
 
-            -- Get arp mode from first band (they share the mode)
             local mode = bands[arp_bands[1]].arp
             local num_notes = #arp_bands
             local total_steps = num_notes * ARP_OCTAVES
 
-            -- Pick which note + octave
             local step_idx
             if mode == 5 then
-              -- RANDOM
               step_idx = math.random(0, total_steps - 1)
             elseif mode == 3 then
-              -- DOWN
               step_idx = (total_steps - 1) - (arps.pos % total_steps)
             elseif mode == 4 then
-              -- UP/DN bounce
               local cycle = (total_steps - 1) * 2
               if cycle < 1 then cycle = 1 end
               local p = arps.pos % cycle
@@ -708,7 +695,6 @@ function start_playing()
                 step_idx = cycle - p
               end
             else
-              -- UP (default)
               step_idx = arps.pos % total_steps
             end
 
@@ -717,7 +703,6 @@ function start_playing()
             local band_idx = arp_bands[note_idx]
             local b = bands[band_idx]
 
-            -- Play this note at the octave offset
             local orig_oct = b.octave
             b.octave = math.max(-3, math.min(3, b.octave + oct_offset))
             vm:activate_melodic(band_idx, bands, get_chord_root())
@@ -727,38 +712,51 @@ function start_playing()
             arps.last_band = band_idx
             arps.pos = arps.pos + 1
           elseif (sixteenth - 1) % fastest_rate == math.floor(fastest_rate / 2) then
-            -- Note off halfway
             if arps.last_band then
               vm:release(arps.last_band)
               arps.last_band = nil
             end
           end
         else
-          -- No arp bands: reset state
           arps.pos = 0
           arps.last_band = nil
         end
       end
 
-      -- === PROGRESSION ===
-      local step_sixteenths = prog.beats_per_step * 4
-      if sixteenth % step_sixteenths == 0 then
-        prog.position = (prog.position % #prog.steps) + 1
-        vm:retrigger_all(bands, get_chord_root())
+      end  -- free_running gate
+
+      -- === PROGRESSION (only when playing) ===
+      if playing then
+        local step_sixteenths = prog.beats_per_step * 4
+        if sixteenth % step_sixteenths == 0 then
+          prog.position = (prog.position % #prog.steps) + 1
+          vm:retrigger_all(bands, get_chord_root())
+        end
       end
 
-      clock.sync(1/4)  -- sync to 16th note
+      clock.sync(1/4)
     end
   end)
 end
 
+function start_playing()
+  if playing then return end
+  playing = true
+  sixteenth = 0
+  prog.position = 1
+
+  -- Activate all bands that have volume > 0
+  for i = 1, NUM_BANDS do
+    if bands[i].vol > 0 and is_melodic(bands[i].role) then
+      activate_band(i)
+    end
+  end
+end
+
 function stop_playing()
   playing = false
-  if main_clock then
-    clock.cancel(main_clock)
-    main_clock = nil
-  end
-  vm:all_off()
+  -- Don't kill the clock or notes - just stop progression
+  -- Drones and arps keep going
 end
 
 -- ===== DRAWING =====
@@ -1232,6 +1230,8 @@ end
 
 function cleanup()
   if redraw_clock then clock.cancel(redraw_clock) end
-  stop_playing()
+  if main_clock then clock.cancel(main_clock) end
+  playing = false
+  vm:all_off()
   if mm then mm:leds_off() end
 end
