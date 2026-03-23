@@ -96,6 +96,8 @@ end
 -- Config page state
 local config_cursor = 1  -- 1=MIDI out, 2=MIDIMIX, 3-6=channels
 local CONFIG_FIELDS = {"MIDI Out", "MIDIMIX", "Bass Ch", "Chord Ch", "Lead Ch", "Drum Ch"}
+local adding_channel = false  -- true when in "add channel" mode
+local pending_channel = 1     -- channel being previewed before confirm
 
 -- ===== INIT =====
 
@@ -701,10 +703,16 @@ function draw_config()
     screen.text(row[2])
   end
 
-  -- Help
-  screen.level(3)
-  screen.move(0, 64)
-  screen.text("E3:ch  K3:+ch  K1+K3:-ch")
+  -- Add-channel overlay
+  if adding_channel then
+    screen.level(15)
+    screen.move(64, 64)
+    screen.text_center("ADD CH: " .. pending_channel .. "  E3:select K3:confirm")
+  else
+    screen.level(3)
+    screen.move(0, 64)
+    screen.text("E3:ch  K3:+ch  K1+K3:-ch")
+  end
 end
 
 -- ===== INPUT =====
@@ -823,15 +831,21 @@ function enc_prog(n, d)
 end
 
 function enc_config(n, d)
+  if adding_channel then
+    -- In add-channel mode: E3 scrolls through channels
+    if n == 3 then
+      pending_channel = util.clamp(pending_channel + d, 1, 16)
+    end
+    return
+  end
+
   if n == 2 then
     config_cursor = util.clamp(config_cursor + d, 1, #CONFIG_FIELDS)
   elseif n == 3 then
     if config_cursor == 1 then
-      -- MIDI Out device
       local val = util.clamp(params:get("midi_device") + d, 1, 16)
       params:set("midi_device", val)
     elseif config_cursor == 2 then
-      -- MIDIMIX device
       local val = util.clamp(params:get("midimix_device") + d, 1, 16)
       params:set("midimix_device", val)
     elseif config_cursor == 3 then
@@ -894,42 +908,47 @@ function key(n, z)
         prog_cursor = 2
       end
     elseif page == 3 then
-      -- CONFIG page: K3 adds channel, K1+K3 removes last channel
       local roles = {"bass", "chord", "lead"}
-      if config_cursor >= 3 and config_cursor <= 5 then
-        local role = roles[config_cursor - 2]
-        if k1_held then
-          -- Remove last extra channel
+      if adding_channel then
+        -- Confirm: add the pending channel
+        if config_cursor >= 3 and config_cursor <= 5 then
+          local role = roles[config_cursor - 2]
+          if vm:add_channel(role, pending_channel) then
+            print(role .. ": added ch " .. pending_channel .. " -> " .. vm:channels_str(role))
+          else
+            print(role .. ": ch " .. pending_channel .. " already added or max 3")
+          end
+        elseif config_cursor == 6 then
+          if vm:add_drum_channel(pending_channel) then
+            print("drum: added ch " .. pending_channel .. " -> " .. vm:drum_channels_str())
+          else
+            print("drum: ch " .. pending_channel .. " already added or max 3")
+          end
+        end
+        adding_channel = false
+      elseif k1_held then
+        -- K1+K3: remove last extra channel
+        if config_cursor >= 3 and config_cursor <= 5 then
+          local role = roles[config_cursor - 2]
           local chs = vm.pools[role].channels
           if #chs > 1 then
             local removed = chs[#chs]
             vm:remove_channel(role, removed)
             print(role .. ": removed ch " .. removed .. " -> " .. vm:channels_str(role))
           end
-        else
-          -- Add next channel (primary + 1)
-          local primary = vm:get_primary_ch(role)
-          local new_ch = primary + #vm.pools[role].channels
-          if new_ch > 16 then new_ch = 1 end
-          if vm:add_channel(role, new_ch) then
-            print(role .. ": added ch " .. new_ch .. " -> " .. vm:channels_str(role))
-          end
-        end
-      elseif config_cursor == 6 then
-        -- Drum channels
-        if k1_held then
+        elseif config_cursor == 6 then
           local chs = vm.drum_channels
           if #chs > 1 then
             local removed = chs[#chs]
             vm:remove_drum_channel(removed)
             print("drum: removed ch " .. removed .. " -> " .. vm:drum_channels_str())
           end
-        else
-          local new_ch = vm.drum_channels[1] + #vm.drum_channels
-          if new_ch > 16 then new_ch = 1 end
-          if vm:add_drum_channel(new_ch) then
-            print("drum: added ch " .. new_ch .. " -> " .. vm:drum_channels_str())
-          end
+        end
+      else
+        -- K3: enter add-channel mode
+        if config_cursor >= 3 and config_cursor <= 6 then
+          adding_channel = true
+          pending_channel = 1
         end
       end
     end
