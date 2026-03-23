@@ -32,7 +32,7 @@ local ROLE_COLORS = {bass=12, chord=15, lead=10, kick=6, snare=5, hat=4}
 local NUMERALS = {"I", "ii", "iii", "IV", "V", "vi", "vii"}
 local EDIT_NAMES = {"VOL", "ROLE", "DEG", "OCT", "RATE", "ARP"}
 local ARP_MODES = {"OFF", "UP", "DN", "UPDN", "RAND"}
-local ARP_STEPS = 7  -- arp cycles through 7 scale degrees
+local ARP_OCTAVES = 3  -- arp spans 3 octaves (0, +1, +2)
 
 -- Drum patterns: 16-step arrays (1=hit, 0=rest)
 -- Fader position selects pattern (0=off, then patterns by intensity/complexity)
@@ -452,34 +452,43 @@ function get_chord_root()
   return prog.steps[prog.position] or 1
 end
 
--- Get the arp-modified degree for a band
-function get_arp_degree(b)
-  if b.arp == 1 then return b.degree end  -- OFF: use base degree
+-- Get the arp octave offset for a band (same note, different octaves)
+function get_arp_octave_offset(b)
+  if b.arp == 1 then return 0 end  -- OFF
 
   local offset = 0
   if b.arp == 2 then
-    -- UP: step through degrees ascending
-    offset = b.arp_pos % ARP_STEPS
+    -- UP: cycle through octaves ascending (0, +1, +2)
+    offset = b.arp_pos % ARP_OCTAVES
   elseif b.arp == 3 then
-    -- DOWN: step through degrees descending
-    offset = -(b.arp_pos % ARP_STEPS)
+    -- DOWN: cycle through octaves descending (0, -1, -2)
+    offset = -(b.arp_pos % ARP_OCTAVES)
   elseif b.arp == 4 then
-    -- UP/DN: bounce
-    local cycle = ARP_STEPS * 2 - 2  -- e.g. 12 for 7 steps
-    local pos = b.arp_pos % cycle
-    if pos < ARP_STEPS then
-      offset = pos
+    -- UP/DN: bounce (0, +1, +2, +1, 0, -1, -2, -1, ...)
+    local cycle = (ARP_OCTAVES - 1) * 2  -- 4 for 3 octaves
+    local pos = b.arp_pos % (cycle * 2)
+    if pos < cycle then
+      -- ascending half
+      if pos < ARP_OCTAVES then
+        offset = pos
+      else
+        offset = cycle - pos
+      end
     else
-      offset = cycle - pos
+      -- descending half
+      local dpos = pos - cycle
+      if dpos < ARP_OCTAVES then
+        offset = -dpos
+      else
+        offset = -(cycle - dpos)
+      end
     end
   elseif b.arp == 5 then
-    -- RANDOM: random degree offset 0-6
-    offset = math.random(0, ARP_STEPS - 1)
+    -- RANDOM: random octave -2 to +2
+    offset = math.random(-2, 2)
   end
 
-  -- Wrap degree within 1-7
-  local deg = ((b.degree - 1 + offset) % 7) + 1
-  return deg
+  return offset
 end
 
 -- Advance arp position for a band (call each pulse)
@@ -492,11 +501,12 @@ end
 function activate_band(i)
   local b = bands[i]
   if is_melodic(b.role) then
-    -- Temporarily apply arp degree
-    local orig_deg = b.degree
-    b.degree = get_arp_degree(b)
+    -- Temporarily apply arp octave offset
+    local orig_oct = b.octave
+    b.octave = b.octave + get_arp_octave_offset(b)
+    b.octave = math.max(-3, math.min(3, b.octave))
     vm:activate_melodic(i, bands, get_chord_root())
-    b.degree = orig_deg
+    b.octave = orig_oct
     flash[i] = 4
   end
 end
