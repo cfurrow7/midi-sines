@@ -180,13 +180,13 @@ function init()
     vm:connect(val)
   end)
 
-  params:add_number("bass_ch", "Bass Ch", 1, 16, 7)
+  params:add_number("bass_ch", "Bass Ch", 1, 16, 2)
   params:set_action("bass_ch", function(val) vm:set_primary_ch("bass", val) end)
 
   params:add_number("chord_ch", "Chord Ch", 1, 16, 4)
   params:set_action("chord_ch", function(val) vm:set_primary_ch("chord", val) end)
 
-  params:add_number("lead_ch", "Lead Ch", 1, 16, 3)
+  params:add_number("lead_ch", "Lead Ch", 1, 16, 10)
   params:set_action("lead_ch", function(val) vm:set_primary_ch("lead", val) end)
 
   params:add_number("drum_ch", "Drum Ch", 1, 16, 15)

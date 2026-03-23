@@ -15,9 +15,9 @@ function Voices.new()
   -- Voice pools: melodic roles
   -- channels = array of MIDI channels (supports layering)
   self.pools = {
-    bass  = { max = 1, channels = {7},  active = {} },  -- Sub 37 mono
-    chord = { max = 6, channels = {4},  active = {} },  -- OB-6 6-voice
-    lead  = { max = 1, channels = {3},  active = {} },  -- Pro 3 mono
+    bass  = { max = 1, channels = {2},     active = {} },  -- Mother 32
+    chord = { max = 6, channels = {4, 11}, active = {} },  -- OB-6 + Evolver
+    lead  = { max = 1, channels = {10, 3}, active = {} },  -- MS-101 + Pro 3
   }
 
   -- Drum config
