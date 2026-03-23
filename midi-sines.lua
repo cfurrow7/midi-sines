@@ -434,6 +434,10 @@ function setup_midimix()
       b.arp = (b.arp % #ARP_MODES) + 1
       b.arp_pos = 0
       b.arp_dir = 1
+      -- Auto-set rate to 1/8 notes if turning arp on from drone
+      if b.arp > 1 and b.rate == 0 then
+        b.rate = 2  -- 1/8 notes
+      end
       cursor = band_idx
       print("Band " .. band_idx .. " arp: " .. ARP_MODES[b.arp])
     end
@@ -851,6 +855,11 @@ function draw_bands()
   local edit_label = EDIT_NAMES[edit_field]
   if edit_field == 5 and is_drum(b_sel.role) then
     edit_label = "PAT:" .. b_sel.pattern
+  elseif edit_field == 5 and is_melodic(b_sel.role) then
+    local rate_names = {[0]="drone","1/16","1/8","1/8.","1/4","","","","1/2","","","","","","","1bar","1bar"}
+    local rn = rate_names[b_sel.rate]
+    if not rn or rn == "" then rn = tostring(b_sel.rate) end
+    edit_label = "RATE:" .. rn
   elseif edit_field == 6 then
     edit_label = "ARP:" .. ARP_MODES[b_sel.arp]
   end
@@ -1039,6 +1048,10 @@ function enc_bands(n, d)
       b.arp = util.clamp(b.arp + d, 1, #ARP_MODES)
       b.arp_pos = 0
       b.arp_dir = 1
+      -- Auto-set rate to 1/8 notes if turning arp on from drone
+      if b.arp > 1 and b.rate == 0 then
+        b.rate = 2  -- 1/8 notes
+      end
     end
   end
 end
