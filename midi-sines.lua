@@ -835,7 +835,7 @@ function draw_bands()
   -- Bottom info line
   local chord_deg = get_chord_root()
   local numeral = NUMERALS[chord_deg] or tostring(chord_deg)
-  local key_name = NOTE_NAMES[vm.key_idx] or "C"
+  local key_name = vm:key_name()
   local scale_name = MusicUtil.SCALES[vm.scale_idx].name
 
   screen.level(8)
@@ -912,7 +912,7 @@ function draw_prog()
     {"Steps", "E3:select  K3:change"},
     {"BPM", tostring(math.floor(bpm))},
     {"Beats/Step", tostring(prog.beats_per_step)},
-    {"Key", NOTE_NAMES[vm.key_idx]},
+    {"Key", vm:key_name()},
     {"Scale", MusicUtil.SCALES[vm.scale_idx].name:sub(1, 12)},
     {"Quantize", vm.quantize and "Scale" or "Chromatic"},
   }
@@ -1070,10 +1070,9 @@ function enc_prog(n, d)
       -- Beats per step
       prog.beats_per_step = util.clamp(prog.beats_per_step + d, 1, 16)
     elseif prog_cursor == 4 then
-      -- Key
-      local k = util.clamp(vm.key_idx + d, 1, 12)
-      vm:set_key(k)
-      params:set("key", k)
+      -- Key (wraps note name + shifts octave)
+      vm:adjust_key(d)
+      params:set("key", vm.key_idx, true)
       if playing then
         vm:retrigger_all(bands, get_chord_root())
       end

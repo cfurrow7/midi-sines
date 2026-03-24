@@ -29,6 +29,7 @@ function Voices.new()
 
   -- Scale state
   self.key_idx = 1          -- 1=C, 2=C#, ... 12=B
+  self.key_octave = 2       -- base octave (0-6)
   self.scale_idx = 1        -- index into MusicUtil.SCALES
   self.quantize = true      -- true=scale degrees, false=chromatic
   self.scale_notes = {}     -- computed MIDI note array
@@ -131,14 +132,39 @@ end
 -- ===== SCALE =====
 
 function Voices:build_scale()
-  local root_midi = (self.key_idx - 1) + 24  -- start from octave 1
+  local root_midi = (self.key_idx - 1) + (self.key_octave * 12)
   local scale_name = MusicUtil.SCALES[self.scale_idx].name
   self.scale_notes = MusicUtil.generate_scale_of_length(root_midi, scale_name, 64)
 end
 
-function Voices:set_key(idx)
+function Voices:set_key(idx, octave)
   self.key_idx = util.clamp(idx, 1, 12)
+  if octave then
+    self.key_octave = util.clamp(octave, 0, 6)
+  end
   self:build_scale()
+end
+
+-- Adjust key by semitones (wraps note name and shifts octave)
+function Voices:adjust_key(delta)
+  local new_idx = self.key_idx + delta
+  local new_oct = self.key_octave
+  while new_idx > 12 do
+    new_idx = new_idx - 12
+    new_oct = new_oct + 1
+  end
+  while new_idx < 1 do
+    new_idx = new_idx + 12
+    new_oct = new_oct - 1
+  end
+  self.key_idx = new_idx
+  self.key_octave = util.clamp(new_oct, 0, 6)
+  self:build_scale()
+end
+
+function Voices:key_name()
+  local names = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"}
+  return names[self.key_idx] .. tostring(self.key_octave)
 end
 
 function Voices:set_scale(idx)
@@ -153,7 +179,7 @@ function Voices:get_note(chord_root_degree, band_degree, octave)
     idx = math.max(1, math.min(#self.scale_notes, idx))
     return self.scale_notes[idx]
   else
-    local root_midi = (self.key_idx - 1) + 60
+    local root_midi = (self.key_idx - 1) + (self.key_octave * 12)
     local semitones = (chord_root_degree - 1) + (band_degree - 1) + (octave * 12)
     return math.max(0, math.min(127, root_midi + semitones))
   end
