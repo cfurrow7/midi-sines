@@ -573,7 +573,7 @@ end
 function deactivate_band(i)
   local b = bands[i]
   if is_melodic(b.role) then
-    vm:deactivate(i, b.role)
+    vm:deactivate(i, b.role, bands, get_chord_root())
   end
 end
 

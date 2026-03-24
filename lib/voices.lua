@@ -214,6 +214,24 @@ end
 
 -- ===== VOICE MANAGEMENT =====
 
+-- Get channels for a band based on round-robin splitting
+-- 1 active band = layer to all channels, 2+ = each gets one channel
+function Voices:get_band_channels(band_idx, role)
+  local pool = self.pools[role]
+  if not pool then return {} end
+  if #pool.channels <= 1 or #pool.active <= 1 then
+    return pool.channels
+  end
+  -- Find this band's position in the active list
+  for i, bid in ipairs(pool.active) do
+    if bid == band_idx then
+      local ch = pool.channels[((i - 1) % #pool.channels) + 1]
+      return {ch}
+    end
+  end
+  return pool.channels  -- fallback: layer all
+end
+
 -- Release a band's sounding note (all its channels)
 function Voices:release(band_idx)
   local s = self.sounding[band_idx]
@@ -243,7 +261,34 @@ function Voices:has_voice(band_idx, role)
   return false
 end
 
--- Activate a melodic band (sends to all channels for that role)
+-- Reassign channels for all active bands in a pool (after pool membership changes)
+-- This ensures round-robin stays correct when bands join/leave
+function Voices:reassign_pool_channels(role, bands_table, chord_root_degree)
+  local pool = self.pools[role]
+  if not pool or #pool.channels <= 1 then return end
+  for _, bid in ipairs(pool.active) do
+    local s = self.sounding[bid]
+    if s then
+      local new_chs = self:get_band_channels(bid, role)
+      -- Only reassign if channels changed
+      local changed = #new_chs ~= #s.channels
+      if not changed then
+        for ci, ch in ipairs(new_chs) do
+          if ch ~= s.channels[ci] then changed = true; break end
+        end
+      end
+      if changed then
+        self:note_off_multi(s.channels, s.note)
+        local b = bands_table[bid]
+        local vel = math.floor(b.vol * 127)
+        self:note_on_multi(new_chs, s.note, vel)
+        self.sounding[bid] = { channels = new_chs, note = s.note }
+      end
+    end
+  end
+end
+
+-- Activate a melodic band (round-robin channel splitting)
 function Voices:activate_melodic(band_idx, bands_table, chord_root_degree)
   local b = bands_table[band_idx]
   local role = b.role
@@ -257,16 +302,20 @@ function Voices:activate_melodic(band_idx, bands_table, chord_root_degree)
   -- Already has a voice? Just update note
   if self:has_voice(band_idx, role) then
     self:release(band_idx)
-    self:note_on_multi(pool.channels, note_val, vel)
-    self.sounding[band_idx] = { channels = pool.channels, note = note_val }
+    local chs = self:get_band_channels(band_idx, role)
+    self:note_on_multi(chs, note_val, vel)
+    self.sounding[band_idx] = { channels = chs, note = note_val }
     return true
   end
 
   -- Room in pool?
   if #pool.active < pool.max then
     table.insert(pool.active, band_idx)
-    self:note_on_multi(pool.channels, note_val, vel)
-    self.sounding[band_idx] = { channels = pool.channels, note = note_val }
+    local chs = self:get_band_channels(band_idx, role)
+    self:note_on_multi(chs, note_val, vel)
+    self.sounding[band_idx] = { channels = chs, note = note_val }
+    -- Reassign existing bands (pool count changed)
+    self:reassign_pool_channels(role, bands_table, chord_root_degree)
     return true
   end
 
@@ -285,17 +334,24 @@ function Voices:activate_melodic(band_idx, bands_table, chord_root_degree)
   if min_idx then
     self:release(min_idx)
     pool.active[min_pool_pos] = band_idx
-    self:note_on_multi(pool.channels, note_val, vel)
-    self.sounding[band_idx] = { channels = pool.channels, note = note_val }
+    local chs = self:get_band_channels(band_idx, role)
+    self:note_on_multi(chs, note_val, vel)
+    self.sounding[band_idx] = { channels = chs, note = note_val }
+    -- Reassign after steal (pool membership changed)
+    self:reassign_pool_channels(role, bands_table, chord_root_degree)
     return true
   end
 
   return false
 end
 
-function Voices:deactivate(band_idx, role)
+function Voices:deactivate(band_idx, role, bands_table, chord_root_degree)
   self:release(band_idx)
   self:remove_from_pool(band_idx, role)
+  -- Reassign remaining bands (pool count changed, might go from split to layered)
+  if bands_table and chord_root_degree then
+    self:reassign_pool_channels(role, bands_table, chord_root_degree)
+  end
 end
 
 -- Trigger a drum hit (all drum channels)
@@ -323,8 +379,9 @@ function Voices:retrigger_all(bands_table, chord_root_degree)
         self:release(band_idx)
         local note_val = self:get_note(chord_root_degree, b.degree, b.octave)
         local vel = math.floor(b.vol * 127)
-        self:note_on_multi(pool.channels, note_val, vel)
-        self.sounding[band_idx] = { channels = pool.channels, note = note_val }
+        local chs = self:get_band_channels(band_idx, role)
+        self:note_on_multi(chs, note_val, vel)
+        self.sounding[band_idx] = { channels = chs, note = note_val }
       end
     end
   end
