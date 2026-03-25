@@ -251,8 +251,10 @@ end
 
 -- Update MIDIMIX LEDs to reflect band states
 -- Call this after volume changes or bank switches
--- bands_table: the main bands array
+-- bands_table: the main bands array (cached for internal use)
 function MidiMix:update_leds(bands_table)
+  if bands_table then self._bands = bands_table end
+  bands_table = bands_table or self._bands
   if not self.midi_in then return end
   for ch = 1, 8 do
     local band = self:band_for(ch)
@@ -273,6 +275,9 @@ function MidiMix:update_leds(bands_table)
       self.midi_in:note_off(rec_note, 0, 1)
     end
   end
+  -- Bank indicator LEDs: left = page 1, right = page 2
+  self.midi_in:note_on(BANK_LEFT_NOTE, self.bank == 0 and 127 or 0, 1)
+  self.midi_in:note_on(BANK_RIGHT_NOTE, self.bank > 0 and 127 or 0, 1)
 end
 
 -- Send all LEDs off
