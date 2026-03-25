@@ -257,10 +257,11 @@ function MidiMix:update_leds(bands_table)
   for ch = 1, 8 do
     local band = self:band_for(ch)
     local note = MUTE_NOTES[ch]
+    -- note_on vel 127 = LED on, note_on vel 0 = LED off
     if bands_table and bands_table[band] and bands_table[band].vol > 0 then
       self.midi_in:note_on(note, 127, 1)
     else
-      self.midi_in:note_off(note, 0, 1)
+      self.midi_in:note_on(note, 0, 1)
     end
   end
 end
@@ -269,7 +270,7 @@ end
 function MidiMix:leds_off()
   if not self.midi_in then return end
   for ch = 1, 8 do
-    self.midi_in:note_off(MUTE_NOTES[ch], 0, 1)
+    self.midi_in:note_on(MUTE_NOTES[ch], 0, 1)
   end
 end
 
