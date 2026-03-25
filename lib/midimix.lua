@@ -89,6 +89,8 @@ function MidiMix:connect(device_num)
   end
   self.debug = true  -- set false once working
   print("MIDIMIX connected on device " .. device_num)
+  -- Start with all LEDs off
+  self:leds_off()
 end
 
 -- Get the band index for a channel (1-8) based on current bank
