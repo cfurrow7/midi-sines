@@ -280,7 +280,7 @@ function MidiMix:update_leds(bands_table)
   self.midi_in:note_on(BANK_RIGHT_NOTE, self.bank > 0 and 127 or 0, 1)
 end
 
--- Send all LEDs off
+-- Send all LEDs off, reset to bank 0 (page 1)
 function MidiMix:leds_off()
   if not self.midi_in then return end
   for ch = 1, 8 do
@@ -289,6 +289,10 @@ function MidiMix:leds_off()
     self.midi_in:note_on(REC_NOTES[ch], 0, 1)
     self.midi_in:note_off(REC_NOTES[ch], 0, 1)
   end
+  -- Start on page 1
+  self.bank = 0
+  self.midi_in:note_on(BANK_LEFT_NOTE, 127, 1)
+  self.midi_in:note_on(BANK_RIGHT_NOTE, 0, 1)
 end
 
 return MidiMix
