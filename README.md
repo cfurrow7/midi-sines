@@ -43,7 +43,7 @@ Edit fields (cycle with K3):
 1. **VOL** - volume (0-1)
 2. **ROLE** - bass/chord/lead/kick/snare/hat
 3. **DEG** - scale degree (1-7)
-4. **OCT** - octave (-3 to +3)
+4. **OCT** - octave (-5 to +5)
 5. **RATE** - melodic: pulse rate (0=drone, 1=1/16, 2=1/8, 4=1/4...) / drums: pattern select (0-10)
 6. **ARP** - arpeggiator mode: OFF/UP/DN/UPDN/RAND
 
