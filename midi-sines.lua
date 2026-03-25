@@ -563,7 +563,7 @@ function activate_band(i)
     -- Temporarily apply arp octave offset
     local orig_oct = b.octave
     b.octave = b.octave + get_arp_octave_offset(b)
-    b.octave = math.max(-3, math.min(3, b.octave))
+    b.octave = math.max(-5, math.min(5, b.octave))
     vm:activate_melodic(i, bands, get_chord_root())
     b.octave = orig_oct
     flash[i] = 4
@@ -704,7 +704,7 @@ function start_clock()
             local b = bands[band_idx]
 
             local orig_oct = b.octave
-            b.octave = math.max(-3, math.min(3, b.octave + oct_offset))
+            b.octave = math.max(-5, math.min(5, b.octave + oct_offset))
             vm:activate_melodic(band_idx, bands, get_chord_root())
             b.octave = orig_oct
             flash[band_idx] = 4
@@ -1024,7 +1024,7 @@ function enc_bands(n, d)
       end
     elseif edit_field == 4 then
       -- Octave
-      b.octave = util.clamp(b.octave + d, -3, 3)
+      b.octave = util.clamp(b.octave + d, -5, 5)
       if b.vol > 0 and is_melodic(b.role) and vm:has_voice(cursor, b.role) then
         activate_band(cursor)
       end
