@@ -265,11 +265,12 @@ function MidiMix:update_leds(bands_table)
     else
       self.midi_in:note_on(note, 0, 1)
     end
-    -- Rec arm LED: on = arp active
+    -- Rec arm LED: on = arp active (same channel as mute)
     if b and b.arp and b.arp > 1 then
       self.midi_in:note_on(rec_note, 127, 1)
     else
       self.midi_in:note_on(rec_note, 0, 1)
+      self.midi_in:note_off(rec_note, 0, 1)
     end
   end
 end
@@ -279,7 +280,9 @@ function MidiMix:leds_off()
   if not self.midi_in then return end
   for ch = 1, 8 do
     self.midi_in:note_on(MUTE_NOTES[ch], 0, 1)
+    self.midi_in:note_off(MUTE_NOTES[ch], 0, 1)
     self.midi_in:note_on(REC_NOTES[ch], 0, 1)
+    self.midi_in:note_off(REC_NOTES[ch], 0, 1)
   end
 end
 
