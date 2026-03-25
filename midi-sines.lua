@@ -187,6 +187,7 @@ function init()
       octave = d.octave,
       rate = d.rate,
       vol = 0,
+      pc = 0,        -- current program change (0-127)
       arp = 1,       -- 1=OFF, 2=UP, 3=DN, 4=UPDN, 5=RAND
       arp_pos = 0,   -- current position in arp sequence
       arp_dir = 1,   -- 1=ascending, -1=descending (for UPDN mode)
@@ -327,6 +328,15 @@ function init()
     print("MIDIMIX not auto-detected. Go to CONFIG page (E1) and set device with E3.")
   end
 
+  -- Send PC 0 (init patch) to all MIDI channels used by all roles
+  for role, _ in pairs(vm.pools) do
+    vm:send_pc(role, 0)
+  end
+  for _, ch in ipairs(vm.drum_channels) do
+    vm:program_change(ch, 0)
+  end
+  print("Init PC 0 sent to all channels")
+
   -- Start the main clock (always running for arp/drums/pulse)
   start_clock()
 
@@ -373,6 +383,7 @@ function setup_midimix()
   mm.on_pc = function(band_idx, program)
     if band_idx >= 1 and band_idx <= NUM_BANDS then
       local b = bands[band_idx]
+      b.pc = program
       vm:send_pc(b.role, program)
       cursor = band_idx
       print("PC " .. program .. " -> " .. b.role)
