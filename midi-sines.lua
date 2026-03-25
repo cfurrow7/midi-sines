@@ -460,6 +460,7 @@ function setup_midimix()
       end
       cursor = band_idx
       print("Band " .. band_idx .. " arp: " .. ARP_MODES[b.arp])
+      mm:update_leds(bands)
     end
   end
 
