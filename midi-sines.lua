@@ -21,10 +21,12 @@
 local MusicUtil = require "musicutil"
 local Voices = include("midi-sines/lib/voices")
 local MidiMix = include("midi-sines/lib/midimix")
+local nb = require("nb/lib/nb")
 
 -- ===== CONSTANTS =====
 
 local NUM_BANDS = 16
+local MAX_NB_BANDS = 16
 local PAGES = {"BANDS", "PROG", "CONFIG"}
 local ROLES = {"bass", "chord", "lead", "kick", "snare", "hat"}
 local ROLE_SHORT = {bass="B", chord="C", lead="L", kick="K", snare="S", hat="H"}
@@ -178,6 +180,9 @@ local pending_channel = 1     -- channel being previewed before confirm
 -- ===== INIT =====
 
 function init()
+  -- Init nb voice system
+  nb:init()
+
   -- Build bands from defaults
   for i = 1, NUM_BANDS do
     local d = DEFAULTS[i]
@@ -192,6 +197,8 @@ function init()
       arp_pos = 0,   -- current position in arp sequence
       arp_dir = 1,   -- 1=ascending, -1=descending (for UPDN mode)
       pattern = d.pattern or 0,  -- drum pattern index (0=use rate, 1-10=preset pattern)
+      output = "midi",       -- "midi" or "nb"
+      nb_sounding = {},      -- notes currently sounding via nb
     }
     flash[i] = 0
   end
@@ -269,6 +276,21 @@ function init()
 
   params:add_number("hat_note", "Hat Note", 0, 127, 2)
   params:set_action("hat_note", function(val) vm.drum_notes.hat = val end)
+
+  -- ===== NB VOICES =====
+  params:add_separator("NB VOICES")
+
+  for i = 1, MAX_NB_BANDS do
+    params:add_option("band_" .. i .. "_output", "Band " .. i .. " Output", {"MIDI", "nb"}, 1)
+    params:set_action("band_" .. i .. "_output", function(val)
+      if bands[i] then
+        bands[i].output = val == 2 and "nb" or "midi"
+      end
+    end)
+
+    nb:add_param("band_" .. i .. "_voice", "Band " .. i .. " Voice")
+  end
+  nb:add_player_params()
 
   -- MIDIMIX params
   params:add_separator("MIDIMIX")
@@ -495,8 +517,14 @@ function setup_midimix()
     -- Zero all band volumes
     for i = 1, NUM_BANDS do
       bands[i].vol = 0
+      nb_release(i)
     end
     vm:all_off()
+    -- Kill all nb voices
+    for i = 1, MAX_NB_BANDS do
+      local player = get_nb_player(i)
+      if player and player.stop_all then player:stop_all() end
+    end
     mm:update_leds(bands)
   end
 end
@@ -506,6 +534,39 @@ end
 function decay_flash()
   for i = 1, NUM_BANDS do
     if flash[i] > 0 then flash[i] = flash[i] - 1 end
+  end
+end
+
+-- ===== NB HELPERS =====
+
+function get_nb_player(band_idx)
+  if band_idx < 1 or band_idx > MAX_NB_BANDS then return nil end
+  local p = params:lookup_param("band_" .. band_idx .. "_voice")
+  if p then return p:get_player() end
+  return nil
+end
+
+function nb_release(band_idx)
+  local b = bands[band_idx]
+  if not b then return end
+  local player = get_nb_player(band_idx)
+  if player then
+    for _, n in ipairs(b.nb_sounding) do
+      player:note_off(n)
+    end
+  end
+  b.nb_sounding = {}
+end
+
+function nb_trigger(band_idx, note, vel)
+  local b = bands[band_idx]
+  if not b then return end
+  nb_release(band_idx)
+  local player = get_nb_player(band_idx)
+  if player and note then
+    player:note_on(note, vel)
+    b.nb_sounding = {note}
+    flash[band_idx] = 4
   end
 end
 
@@ -572,20 +633,34 @@ end
 function activate_band(i)
   local b = bands[i]
   if is_melodic(b.role) then
-    -- Temporarily apply arp octave offset
-    local orig_oct = b.octave
-    b.octave = b.octave + get_arp_octave_offset(b)
-    b.octave = math.max(-5, math.min(5, b.octave))
-    vm:activate_melodic(i, bands, get_chord_root())
-    b.octave = orig_oct
-    flash[i] = 4
+    if b.output == "nb" then
+      -- Route through nb voice
+      local orig_oct = b.octave
+      b.octave = b.octave + get_arp_octave_offset(b)
+      b.octave = math.max(-5, math.min(5, b.octave))
+      local note = vm:get_note(get_chord_root(), b.degree, b.octave)
+      nb_trigger(i, note, b.vol)
+      b.octave = orig_oct
+    else
+      -- Route through MIDI voice manager
+      local orig_oct = b.octave
+      b.octave = b.octave + get_arp_octave_offset(b)
+      b.octave = math.max(-5, math.min(5, b.octave))
+      vm:activate_melodic(i, bands, get_chord_root())
+      b.octave = orig_oct
+      flash[i] = 4
+    end
   end
 end
 
 function deactivate_band(i)
   local b = bands[i]
   if is_melodic(b.role) then
-    vm:deactivate(i, b.role, bands, get_chord_root())
+    if b.output == "nb" then
+      nb_release(i)
+    else
+      vm:deactivate(i, b.role, bands, get_chord_root())
+    end
   end
 end
 
@@ -640,12 +715,21 @@ function start_clock()
 
           if should_hit then
             local vel = math.floor(b.vol * 127)
-            vm:trigger_drum(b.role, vel)
-            flash[i] = 3
-            clock.run(function()
-              clock.sleep(0.05)
-              vm:release_drum(b.role)
-            end)
+            if b.output == "nb" then
+              local note = vm.drum_notes[b.role] or 36
+              nb_trigger(i, note, b.vol)
+              clock.run(function()
+                clock.sleep(0.05)
+                nb_release(i)
+              end)
+            else
+              vm:trigger_drum(b.role, vel)
+              flash[i] = 3
+              clock.run(function()
+                clock.sleep(0.05)
+                vm:release_drum(b.role)
+              end)
+            end
           end
         end
       end
@@ -654,11 +738,15 @@ function start_clock()
       for i = 1, NUM_BANDS do
         local b = bands[i]
         if b.vol > 0 and is_melodic(b.role) and b.arp == 1 and b.rate > 0 and (playing or free_running) then
-          if vm:has_voice(i, b.role) then
+          if b.output == "nb" or vm:has_voice(i, b.role) then
             if (sixteenth - 1) % b.rate == 0 then
               activate_band(i)
             elseif (sixteenth - 1) % b.rate == math.floor(b.rate / 2) then
-              vm:release(i)
+              if b.output == "nb" then
+                nb_release(i)
+              else
+                vm:release(i)
+              end
             end
           end
         end
@@ -685,7 +773,12 @@ function start_clock()
         if #arp_bands > 0 then
           if (sixteenth - 1) % fastest_rate == 0 then
             if arps.last_band then
-              vm:release(arps.last_band)
+              local lb = bands[arps.last_band]
+              if lb and lb.output == "nb" then
+                nb_release(arps.last_band)
+              else
+                vm:release(arps.last_band)
+              end
             end
 
             local mode = bands[arp_bands[1]].arp
@@ -717,15 +810,25 @@ function start_clock()
 
             local orig_oct = b.octave
             b.octave = math.max(-5, math.min(5, b.octave + oct_offset))
-            vm:activate_melodic(band_idx, bands, get_chord_root())
+            if b.output == "nb" then
+              local note = vm:get_note(get_chord_root(), b.degree, b.octave)
+              nb_trigger(band_idx, note, b.vol)
+            else
+              vm:activate_melodic(band_idx, bands, get_chord_root())
+              flash[band_idx] = 4
+            end
             b.octave = orig_oct
-            flash[band_idx] = 4
 
             arps.last_band = band_idx
             arps.pos = arps.pos + 1
           elseif (sixteenth - 1) % fastest_rate == math.floor(fastest_rate / 2) then
             if arps.last_band then
-              vm:release(arps.last_band)
+              local lb = bands[arps.last_band]
+              if lb and lb.output == "nb" then
+                nb_release(arps.last_band)
+              else
+                vm:release(arps.last_band)
+              end
               arps.last_band = nil
             end
           end
@@ -743,6 +846,13 @@ function start_clock()
         if sixteenth % step_sixteenths == 0 then
           prog.position = (prog.position % #prog.steps) + 1
           vm:retrigger_all(bands, get_chord_root())
+          -- Retrigger nb bands on chord change
+          for i = 1, NUM_BANDS do
+            local b = bands[i]
+            if b.output == "nb" and b.vol > 0 and is_melodic(b.role) then
+              activate_band(i)
+            end
+          end
         end
       end
 
