@@ -201,19 +201,21 @@ function MidiMix:handle_note_on(note)
     return
   end
 
-  -- Mute buttons: toggle band
+  -- Mute buttons: toggle band (defer LED update to note_off)
   local mute_ch = self._mute_map[note]
   if mute_ch then
     local band = self:band_for(mute_ch)
     if self.on_mute_toggle then self.on_mute_toggle(band) end
+    self._pending_led_update = true
     return
   end
 
-  -- Rec arm buttons
+  -- Rec arm buttons (defer LED update to note_off)
   local rec_ch = self._rec_map[note]
   if rec_ch then
     local band = self:band_for(rec_ch)
     if self.on_rec then self.on_rec(band) end
+    self._pending_led_update = true
     return
   end
 
@@ -246,6 +248,13 @@ function MidiMix:handle_note_off(note)
     end
     self.solo_held = false
     self._solo_used_as_modifier = false
+    return
+  end
+
+  -- Update LEDs on button release (after hardware is done toggling)
+  if self._pending_led_update then
+    self._pending_led_update = false
+    self:update_leds()
   end
 end
 
