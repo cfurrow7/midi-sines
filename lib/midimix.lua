@@ -44,10 +44,12 @@ function MidiMix.new()
 
   self.midi_in = nil
   self.bank = 0          -- 0 = bands 1-8, 1 = bands 9-16
+  self.synth_mode = false -- true = synth param page
+  self.max_band_banks = 1 -- 2 pages of 8 bands
   self.saved_vol = {}    -- saved volumes for mute toggle
   for i = 1, 16 do self.saved_vol[i] = 0.5 end
 
-  -- Callbacks (set by main script)
+  -- Callbacks (set by main script) - BAND MODE
   self.on_volume = nil       -- function(band_idx, vol)
   self.on_degree = nil       -- function(band_idx, degree)
   self.on_pc = nil           -- function(band_idx, program)
@@ -59,6 +61,12 @@ function MidiMix.new()
   self.on_panic = nil        -- function()  -- SEND ALL button
   self.on_solo = nil         -- function()  -- SOLO button
   self.on_global_octave = nil -- function(octave) -- SOLO+knob row 1
+
+  -- Callbacks - SYNTH MODE
+  self.on_synth_ch = nil        -- (slot, midi_ch 1-16)
+  self.on_synth_mod = nil       -- (slot, val 0-127)
+  self.on_synth_bend = nil      -- (slot, val 0-127)
+  self.on_synth_output = nil    -- (slot) toggle MIDI/nb
 
   self.solo_held = false     -- track SOLO button hold state
 
@@ -146,48 +154,82 @@ function MidiMix:handle_cc(cc, val)
     return
   end
 
-  -- Knob row 1: degree (or global octave if SOLO held)
-  local k1 = self._knob1_map[cc]
-  if k1 then
-    if self.solo_held then
-      self._solo_used_as_modifier = true
-      local octave = cc_to_range(val, -3, 3)
-      if self.on_global_octave then self.on_global_octave(octave) end
-    else
-      local band = self:band_for(k1)
-      local degree = cc_to_range(val, 1, 7)
-      if self.on_degree then self.on_degree(band, degree) end
+  if self.synth_mode then
+    -- SYNTH MODE: knobs control channel/modulation/bend
+    local k1 = self._knob1_map[cc]
+    if k1 then
+      local ch = cc_to_range(val, 1, 16)
+      if self.on_synth_ch then self.on_synth_ch(k1, ch) end
+      return
     end
-    return
-  end
 
-  -- Knob row 2: program change (0-127)
-  local k2 = self._knob2_map[cc]
-  if k2 then
-    local band = self:band_for(k2)
-    if self.on_pc then self.on_pc(band, val) end
-    return
-  end
+    local k2 = self._knob2_map[cc]
+    if k2 then
+      if self.on_synth_mod then self.on_synth_mod(k2, val) end
+      return
+    end
 
-  -- Knob row 3: rate
-  local k3 = self._knob3_map[cc]
-  if k3 then
-    local band = self:band_for(k3)
-    local rate = cc_to_range(val, 0, 16)
-    if self.on_rate then self.on_rate(band, rate) end
-    return
+    local k3 = self._knob3_map[cc]
+    if k3 then
+      if self.on_synth_bend then self.on_synth_bend(k3, val) end
+      return
+    end
+  else
+    -- BAND MODE: normal knob behavior
+    -- Knob row 1: degree (or global octave if SOLO held)
+    local k1 = self._knob1_map[cc]
+    if k1 then
+      if self.solo_held then
+        self._solo_used_as_modifier = true
+        local octave = cc_to_range(val, -3, 3)
+        if self.on_global_octave then self.on_global_octave(octave) end
+      else
+        local band = self:band_for(k1)
+        local degree = cc_to_range(val, 1, 7)
+        if self.on_degree then self.on_degree(band, degree) end
+      end
+      return
+    end
+
+    -- Knob row 2: program change (0-127)
+    local k2 = self._knob2_map[cc]
+    if k2 then
+      local band = self:band_for(k2)
+      if self.on_pc then self.on_pc(band, val) end
+      return
+    end
+
+    -- Knob row 3: rate
+    local k3 = self._knob3_map[cc]
+    if k3 then
+      local band = self:band_for(k3)
+      local rate = cc_to_range(val, 0, 16)
+      if self.on_rate then self.on_rate(band, rate) end
+      return
+    end
   end
 
   -- Bank buttons (some units send CC instead of notes)
   if cc == BANK_LEFT_CC and val == 127 then
-    self.bank = 0
-    if self.on_bank then self.on_bank(0) end
+    if self.synth_mode then
+      self.synth_mode = false
+      self.bank = self.max_band_banks
+    elseif self.bank > 0 then
+      self.bank = self.bank - 1
+    end
+    if self.on_bank then self.on_bank(self.bank) end
     self:update_leds()
     return
   end
   if cc == BANK_RIGHT_CC and val == 127 then
-    self.bank = 1
-    if self.on_bank then self.on_bank(1) end
+    if not self.synth_mode then
+      if self.bank >= self.max_band_banks then
+        self.synth_mode = true
+      else
+        self.bank = self.bank + 1
+        if self.on_bank then self.on_bank(self.bank) end
+      end
+    end
     self:update_leds()
     return
   end
@@ -204,8 +246,12 @@ function MidiMix:handle_note_on(note)
   -- Mute buttons: toggle band (defer LED update to note_off)
   local mute_ch = self._mute_map[note]
   if mute_ch then
-    local band = self:band_for(mute_ch)
-    if self.on_mute_toggle then self.on_mute_toggle(band) end
+    if self.synth_mode then
+      if self.on_synth_output then self.on_synth_output(mute_ch) end
+    else
+      local band = self:band_for(mute_ch)
+      if self.on_mute_toggle then self.on_mute_toggle(band) end
+    end
     self._pending_led_update = true
     return
   end
@@ -227,14 +273,29 @@ function MidiMix:handle_note_on(note)
 
   -- Bank buttons (note variant)
   if note == BANK_LEFT_NOTE then
-    self.bank = 0
-    if self.on_bank then self.on_bank(0) end
+    if self.synth_mode then
+      self.synth_mode = false
+      self.bank = self.max_band_banks
+      print("MIDIMIX: band page " .. (self.bank + 1))
+    else
+      if self.bank > 0 then
+        self.bank = self.bank - 1
+      end
+      if self.on_bank then self.on_bank(self.bank) end
+    end
     self:update_leds()
     return
   end
   if note == BANK_RIGHT_NOTE then
-    self.bank = 1
-    if self.on_bank then self.on_bank(1) end
+    if not self.synth_mode then
+      if self.bank >= self.max_band_banks then
+        self.synth_mode = true
+        print("MIDIMIX: SYNTH page")
+      else
+        self.bank = self.bank + 1
+        if self.on_bank then self.on_bank(self.bank) end
+      end
+    end
     self:update_leds()
     return
   end
@@ -266,27 +327,45 @@ function MidiMix:update_leds(bands_table)
   bands_table = bands_table or self._bands
   if not self.midi_in then return end
   for ch = 1, 8 do
-    local band = self:band_for(ch)
     local note = MUTE_NOTES[ch]
     local rec_note = REC_NOTES[ch]
-    local b = bands_table and bands_table[band]
-    -- Mute LED: on = has volume
-    if b and b.vol > 0 then
-      self.midi_in:note_on(note, 127, 1)
+    if self.synth_mode then
+      -- Synth page: mute LED = nb output, rec LED = nb output
+      local b = bands_table and bands_table[ch]
+      if b and b.output == "nb" then
+        self.midi_in:note_on(note, 127, 1)
+        self.midi_in:note_on(rec_note, 127, 1)
+      else
+        self.midi_in:note_on(note, 0, 1)
+        self.midi_in:note_on(rec_note, 0, 1)
+        self.midi_in:note_off(rec_note, 0, 1)
+      end
     else
-      self.midi_in:note_on(note, 0, 1)
-    end
-    -- Rec arm LED: on = arp active (same channel as mute)
-    if b and b.arp and b.arp > 1 then
-      self.midi_in:note_on(rec_note, 127, 1)
-    else
-      self.midi_in:note_on(rec_note, 0, 1)
-      self.midi_in:note_off(rec_note, 0, 1)
+      local band = self:band_for(ch)
+      local b = bands_table and bands_table[band]
+      -- Mute LED: on = has volume
+      if b and b.vol > 0 then
+        self.midi_in:note_on(note, 127, 1)
+      else
+        self.midi_in:note_on(note, 0, 1)
+      end
+      -- Rec arm LED: on = arp active
+      if b and b.arp and b.arp > 1 then
+        self.midi_in:note_on(rec_note, 127, 1)
+      else
+        self.midi_in:note_on(rec_note, 0, 1)
+        self.midi_in:note_off(rec_note, 0, 1)
+      end
     end
   end
-  -- Bank indicator LEDs: left = page 1, right = page 2
-  self.midi_in:note_on(BANK_LEFT_NOTE, self.bank == 0 and 127 or 0, 1)
-  self.midi_in:note_on(BANK_RIGHT_NOTE, self.bank > 0 and 127 or 0, 1)
+  -- Bank indicator LEDs: left = page 1, right = page 2, both = synth
+  if self.synth_mode then
+    self.midi_in:note_on(BANK_LEFT_NOTE, 127, 1)
+    self.midi_in:note_on(BANK_RIGHT_NOTE, 127, 1)
+  else
+    self.midi_in:note_on(BANK_LEFT_NOTE, self.bank == 0 and 127 or 0, 1)
+    self.midi_in:note_on(BANK_RIGHT_NOTE, self.bank > 0 and 127 or 0, 1)
+  end
 end
 
 -- Send all LEDs off, reset to bank 0 (page 1)

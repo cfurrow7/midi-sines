@@ -527,6 +527,55 @@ function setup_midimix()
     end
     mm:update_leds(bands)
   end
+
+  -- ===== SYNTH PAGE CALLBACKS =====
+
+  -- Mute on synth page: toggle output MIDI/nb
+  mm.on_synth_output = function(slot)
+    local b = bands[slot]
+    if not b then return end
+    if b.output == "nb" then
+      b.output = "midi"
+      print("Band " .. slot .. " -> MIDI")
+    else
+      b.output = "nb"
+      print("Band " .. slot .. " -> nb voice")
+    end
+    mm:update_leds(bands)
+  end
+
+  -- Knob 1 on synth page: MIDI channel (1-16)
+  mm.on_synth_ch = function(slot, ch)
+    local b = bands[slot]
+    if not b then return end
+    -- Update the voice manager's primary channel for this band's role
+    if is_melodic(b.role) then
+      vm:set_primary_ch(b.role, ch)
+      print("Band " .. slot .. " (" .. b.role .. ") ch -> " .. ch)
+    elseif is_drum(b.role) then
+      vm.drum_channels[1] = ch
+      print("Drums ch -> " .. ch)
+    end
+  end
+
+  -- Knob 2 on synth page: nb modulation (0-127)
+  mm.on_synth_mod = function(slot, val)
+    local player = get_nb_player(slot)
+    if player then
+      player:modulate(val / 127)
+    end
+  end
+
+  -- Knob 3 on synth page: nb pitch bend (0-127, center=64)
+  mm.on_synth_bend = function(slot, val)
+    local b = bands[slot]
+    if not b then return end
+    local player = get_nb_player(slot)
+    if player and #b.nb_sounding > 0 then
+      local amount = (val - 64) / 64  -- -1 to +1
+      player:pitch_bend(b.nb_sounding[1], amount)
+    end
+  end
 end
 
 -- ===== FLASH =====
